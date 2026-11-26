@@ -10,7 +10,7 @@
 <link rel='apple-touch-icon' href='/icon-192.png'>
 <meta name='apple-mobile-web-app-capable' content='yes'>
 <meta name='apple-mobile-web-app-title' content='photonnAI'>
-<link rel='stylesheet' href='/style.css?v=5'>
+<link rel='stylesheet' href='/style.css?v=6'>
 <script>
   // Тему ставим до первой отрисовки, иначе при светлой теме экран мигает чёрным.
   try {
@@ -190,6 +190,20 @@
 
 <!-- END AADS AD UNIT 2463382 -->
 
-<script src='/app.js?v=5'></script>
+<script>
+(function () {
+  if ('caches' in window) {
+    caches.keys().then(function (ks) {
+      ks.forEach(function (k) { if (k.indexOf('photonn-v6') !== 0) caches.delete(k); });
+    }).catch(function () {});
+  }
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(function (rs) {
+      rs.forEach(function (r) { r.update().catch(function () {}); });
+    }).catch(function () {});
+  }
+})();
+</script>
+<script src='/app.js?v=6'></script>
 </body>
 </html>

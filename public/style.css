@@ -385,3 +385,10 @@ input, textarea, select { font-family: inherit; color: var(--text); }
   .composer { padding: 8px 14px 14px; }
   .composer-hint { font-size: 10.5px; }
 }
+
+/* ---------- A-ADS sticky banner (unit 2463382) ---------- */
+body { padding-right: max(100px, 15%); }
+body:has(#aadsstickymwxj8cwh:checked) { padding-right: 0; }
+#aadsstickymwxj8cwh + div > div { pointer-events: none; }
+#aadsstickymwxj8cwh + div > div iframe,
+#aadsstickymwxj8cwh + div > div label { pointer-events: auto; }

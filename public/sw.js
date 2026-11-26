@@ -2,8 +2,8 @@
 
 // Офлайн-оболочка photonnAI: сеть в приоритете, кэш — только когда сети нет.
 // Так обновления сайта видно сразу, а без интернета открывается хотя бы каркас.
-const CACHE = 'photonn-v11';
-const SHELL = ['/', '/app.js?v=11', '/style.css?v=11', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
+const CACHE = 'photonn-v12';
+const SHELL = ['/', '/app.js?v=12', '/style.css?v=12', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()).catch(() => {}));

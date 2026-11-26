@@ -217,18 +217,18 @@ const MODES = {
 function currentMode() {
   const tier = (state.settings && state.settings.tier) || 'pro';
   if (tier === 'easy') return 'flash';
-  if (tier === 'pro') return state.deepMode ? 'reasoning' : 'pro';
-  return 'standard';
+  // medium — старый уровень из ранних версий; в новой модели это Pro.
+  return state.deepMode ? 'reasoning' : 'pro';
 }
 
 function modeLabel() {
-  const mode = currentMode();
-  return mode === 'standard' ? 'Standard' : MODES[mode].label;
+  return MODES[currentMode()].label;
 }
 
 function tierLabel(id) {
   const name = id || 'pro';
   if (name === 'easy') return 'Flash';
+  if (name === 'pro' || name === 'medium') return 'Pro';
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
@@ -493,13 +493,14 @@ async function streamReply(view, text, opts) {
   const msg = view.msg;
 
   try {
+    const mode = MODES[currentMode()] || MODES.pro;
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chatId: state.currentId,
         text,
-        tier: state.settings.tier,
+        tier: mode.tier,
         temperature: state.settings.temperature,
         image: state.pendingImage,
         web: state.webSearch,
@@ -511,7 +512,7 @@ async function streamReply(view, text, opts) {
     });
 
     // Токен тратится только на Pro/глубокий режим — при обычном Easy он не должен пропадать.
-    const usedToken = Boolean(state.adToken) && (state.settings.tier === 'pro' || state.deepMode);
+    const usedToken = Boolean(state.adToken) && (mode.tier === 'pro' || state.deepMode);
     if (res.ok && usedToken) state.adToken = null;
 
     if (!res.ok) {

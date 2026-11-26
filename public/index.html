@@ -10,7 +10,7 @@
 <link rel='apple-touch-icon' href='/icon-192.png'>
 <meta name='apple-mobile-web-app-capable' content='yes'>
 <meta name='apple-mobile-web-app-title' content='photonnAI'>
-<link rel='stylesheet' href='/style.css?v=6'>
+<link rel='stylesheet' href='/style.css?v=7'>
 <script>
   // Тему ставим до первой отрисовки, иначе при светлой теме экран мигает чёрным.
   try {
@@ -25,19 +25,35 @@
 </head>
 <body>
 <div class='app' id='app'>
-  <aside class='sidebar' id='sidebar'>
-    <div class='brand'>
-      <div class='logo'>φ</div>
-      <div class='brand-text'>
-        <div class='brand-title'>photonnAI</div>
-        <div class='brand-sub'>персональный ИИ · NVIDIA</div>
+  <nav class='rail' aria-label='Навигация'>
+    <button class='rail-btn' id='toggleSidebar' title='История чатов' aria-label='История чатов'>
+      <svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M4 6h16M4 12h16M4 18h11'/></svg>
+    </button>
+    <button class='rail-btn' id='newChatRail' title='Новый чат' aria-label='Новый чат'>
+      <svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round'><path d='M12 5v14M5 12h14'/></svg>
+    </button>
+    <div class='rail-spacer'></div>
+    <button class='rail-btn' id='btnSettings' title='Настройки' aria-label='Настройки'>
+      <svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='3.2'/><path d='M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 8.9 19.3a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.7 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.7 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.7a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.1A1.7 1.7 0 0 0 15.1 4.7a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.3 9c.2.63.77 1.05 1.43 1.03H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z'/></svg>
+    </button>
+    <button class='rail-avatar' id='railAvatar' title='Аккаунт' aria-label='Аккаунт'>К</button>
+  </nav>
+
+  <aside class='sidebar' id='sidebar' aria-label='История чатов'>
+    <div class='drawer-head'>
+      <div class='brand'>
+        <div class='logo'>φ</div>
+        <div class='brand-text'>
+          <div class='brand-title'>photonnAI</div>
+          <div class='brand-sub'>персональный ИИ · NVIDIA</div>
+        </div>
       </div>
+      <button class='rail-btn drawer-close' id='drawerClose' title='Закрыть' aria-label='Закрыть'>✕</button>
     </div>
     <button class='new-chat' id='newChat'>Новый чат</button>
     <div class='list-label'>История</div>
     <div class='chat-list' id='chatList'></div>
     <div class='sidebar-foot'>
-      <button class='side-settings' id='sideSettings'><span class='ico'>⚙</span> Настройки</button>
       <div class='key-state' id='learnState'>Оценок: 0 · фактов: 0</div>
     </div>
     <div class='side-auth' id='sideAuth'></div>
@@ -124,42 +140,54 @@
 
   <main class='main'>
     <header class='topbar'>
-      <div class='topbar-left'>
-        <button class='icon' id='toggleSidebar' title='Меню'>☰</button>
-        <div class='crumb' id='crumb'><b>Новый чат</b></div>
-      </div>
-      <div class='tier-select' id='tierSelect'>
-        <button data-tier='easy' title='Быстрая модель для простых вопросов'>Easy</button>
-        <button data-tier='medium' title='Сбалансированная модель'>Medium</button>
-        <button data-tier='pro' title='Максимум качества для сложных задач'>Pro</button>
-      </div>
+      <div class='crumb' id='crumb'><b>Новый чат</b></div>
       <div class='topbar-right'>
-        <button class='icon gear' id='btnSettings' title='Настройки'>⚙</button>
+        <button class='pill' id='btnInstall'>Скачать приложение</button>
+        <button class='pill accent' id='btnPlan'>Сменить план</button>
       </div>
     </header>
 
-    <div class='messages' id='messages'></div>
+    <div class='stage' id='stage'>
+      <div class='messages' id='messages'></div>
 
-    <div class='composer'>
-      <div class='composer-tools'>
-        <button class='tool' id='btnPhoto' title='Прикрепить фото — модель его проанализирует'>📷</button>
-        <input type='file' id='fileInput' accept='image/png,image/jpeg,image/webp' hidden>
-        <button class='tool' id='btnCamera' title='Сфотографировать и отправить'>📸</button>
-        <input type='file' id='cameraInput' accept='image/*' capture='environment' hidden>
-        <button class='tool' id='btnMic' title='Голосовой ввод' hidden>🎙</button>
-        <button class='tool' id='btnWeb' title='Веб-поиск: модель найдёт свежие данные'>🌐</button>
-        <button class='tool' id='btnDeep' title='Глубокое размышление: максимум рассуждений'>🧠</button>
+      <div class='composer'>
+        <div class='img-preview hidden' id='imgPreview'>
+          <img id='previewThumb' alt='Прикреплённое фото'>
+          <button class='tool' id='imgRemove' title='Убрать фото'>✕</button>
+        </div>
+        <div class='composer-box'>
+          <button class='tool plus' id='btnPhoto' title='Прикрепить фото — модель его проанализирует' aria-label='Прикрепить фото'>
+            <svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round'><path d='M12 5v14M5 12h14'/></svg>
+          </button>
+          <input type='file' id='fileInput' accept='image/png,image/jpeg,image/webp' hidden>
+          <input type='file' id='cameraInput' accept='image/*' capture='environment' hidden>
+          <textarea id='input' rows='1' placeholder='Спросить photonnAI'></textarea>
+          <div class='tier-wrap'>
+            <button class='tier-btn' id='tierBtn' aria-haspopup='true' aria-expanded='false' title='Уровень модели'>
+              <span id='tierLabel'>Pro</span>
+              <svg class='chev' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>
+            </button>
+            <div class='tier-menu hidden' id='tierSelect' role='menu'>
+              <button data-tier='easy' role='menuitem'>Easy <small>быстро</small></button>
+              <button data-tier='medium' role='menuitem'>Medium <small>баланс</small></button>
+              <button data-tier='pro' role='menuitem'>Pro <small>максимум</small></button>
+            </div>
+          </div>
+          <button class='tool' id='btnMic' title='Голосовой ввод' aria-label='Голосовой ввод' hidden>
+            <svg width='17' height='17' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round'><rect x='9' y='3' width='6' height='11' rx='3'/><path d='M5 11a7 7 0 0 0 14 0M12 18v3'/></svg>
+          </button>
+          <button class='send' id='send' title='Отправить' aria-label='Отправить'>
+            <svg width='17' height='17' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M12 19V5M6 11l6-6 6 6'/></svg>
+          </button>
+          <button class='stop' id='stop' hidden title='Остановить'>■</button>
+        </div>
+        <div class='composer-extras'>
+          <button class='chip' id='btnCamera' title='Сфотографировать и отправить'>📷 Камера</button>
+          <button class='chip' id='btnWeb' title='Веб-поиск: модель найдёт свежие данные'>🌐 Веб-поиск</button>
+          <button class='chip' id='btnDeep' title='Глубокое размышление: максимум рассуждений'>🧠 Размышления</button>
+        </div>
+        <div class='composer-hint'>photonnAI может ошибаться. Проверяйте важные факты.</div>
       </div>
-      <div class='img-preview hidden' id='imgPreview'>
-        <img id='previewThumb' alt='Прикреплённое фото'>
-        <button class='tool' id='imgRemove' title='Убрать фото'>✕</button>
-      </div>
-      <div class='composer-box'>
-        <textarea id='input' rows='1' placeholder='Напишите сообщение…'></textarea>
-        <button class='send' id='send' title='Отправить'>➤</button>
-        <button class='stop' id='stop' hidden title='Остановить'>■</button>
-      </div>
-      <div class='composer-hint'>photonnAI может ошибаться. Проверяйте важные факты.</div>
     </div>
   </main>
 </div>
@@ -177,7 +205,7 @@
               <polygon points="456.851,0 245,212.564 33.149,0 0.708,32.337 212.669,245.004 0.708,457.678 33.149,490 245,277.443 456.851,490 489.292,457.678 277.331,245.004 489.292,32.337 "/>
             </svg>
           </label>
-          <div id="frame" style="width: 100%;margin: auto;position: relative; z-index: 99998;height:100%; display: flex;flex-direction: column; justify-content: center">
+          <div id="frame" style="width: 100%;margin: auto;position: relative; z-index: 99998;height:100%; display: flex; flex-direction: column; justify-content: center">
                         <iframe data-aa=2463382 src=//acceptable.a-ads.com/2463382/?size=Adaptive style='border:0; padding:0; width:70%; height:70%; overflow:hidden; margin: 0 auto'></iframe>
                     </div>
         </div>
@@ -194,7 +222,7 @@
 (function () {
   if ('caches' in window) {
     caches.keys().then(function (ks) {
-      ks.forEach(function (k) { if (k.indexOf('photonn-v6') !== 0) caches.delete(k); });
+      ks.forEach(function (k) { if (k.indexOf('photonn-v7') !== 0) caches.delete(k); });
     }).catch(function () {});
   }
   if ('serviceWorker' in navigator) {
@@ -204,6 +232,6 @@
   }
 })();
 </script>
-<script src='/app.js?v=6'></script>
+<script src='/app.js?v=7'></script>
 </body>
 </html>

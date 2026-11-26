@@ -212,6 +212,38 @@ function tierLabel(id) {
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
+function setStageEmpty(empty) {
+  const stage = $('stage');
+  if (stage) stage.classList.toggle('empty', !!empty);
+}
+
+function closeTierMenu() {
+  const menu = $('tierSelect');
+  const btn = $('tierBtn');
+  if (menu) menu.classList.add('hidden');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+// «Скачать приложение»: установка PWA, если браузер её предлагает, иначе — подсказка.
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+});
+
+async function installApp() {
+  if (installPrompt) {
+    installPrompt.prompt();
+    try { await installPrompt.userChoice; } catch (e) {}
+    installPrompt = null;
+    return;
+  }
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  toast(standalone
+    ? 'Приложение уже установлено'
+    : 'Меню браузера → «Установить приложение». На iPhone: «Поделиться» → «На экран Домой»');
+}
+
 function toast(text) {
   const t = $('toast');
   t.textContent = text;
@@ -257,10 +289,7 @@ function messageNode(msg, question) {
 
 function welcomeNode() {
   const w = el('div', 'welcome');
-  const tier = (state.settings && state.settings.tier) || 'pro';
-  w.appendChild(el('div', 'kicker', 'photonnAI · уровень ' + tierLabel(tier)));
-  w.appendChild(el('h1', null, 'Чем помочь?'));
-  w.appendChild(el('p', null, 'Опишите задачу — я разберу её по шагам, проверю себя и дам конкретный результат. Для сложных вопросов выбирайте Pro.'));
+  w.appendChild(el('h1', null, 'С чего начнем?'));
 
   if (!state.hasKey) {
     const p = el('p', 'hint', 'Один раз вставь API-ключ NVIDIA — дальше всё работает само.');
@@ -275,18 +304,6 @@ function welcomeNode() {
     save.onclick = () => saveInlineKey(input, status, save);
     row.append(input, save);
     w.append(p, row, status);
-  } else {
-    const tips = el('div', 'tips');
-    [
-      ['⌘', 'Код', 'Написать, объяснить, найти ошибку'],
-      ['◇', 'Учёба', 'Экзамены, задачи, конспекты'],
-      ['✎', 'Тексты', 'Письма, планы, редактура']
-    ].forEach(([ico, title, sub]) => {
-      const card = el('div', 'tip');
-      card.append(el('span', 'tip-ico', ico), el('b', null, title), el('span', null, sub));
-      tips.appendChild(card);
-    });
-    w.appendChild(tips);
   }
   return w;
 }
@@ -302,6 +319,7 @@ function renderMessages() {
   const box = $('messages');
   box.innerHTML = '';
   updateCrumb();
+  setStageEmpty(!state.messages.length);
   if (!state.messages.length) { box.appendChild(welcomeNode()); return; }
   let question = '';
   for (const m of state.messages) {
@@ -343,6 +361,7 @@ function appendStreamingMessage(msg) {
   const box = $('messages');
   const welcome = box.querySelector('.welcome');
   if (welcome) welcome.remove();
+  setStageEmpty(false);
   box.appendChild(row);
   box.scrollTop = box.scrollHeight;
 
@@ -520,6 +539,7 @@ async function send() {
   const box = $('messages');
   const welcome = box.querySelector('.welcome');
   if (welcome) welcome.remove();
+  setStageEmpty(false);
   box.appendChild(messageNode(userMsg));
   box.scrollTop = box.scrollHeight;
 
@@ -555,6 +575,12 @@ async function initAuth() {
 function renderAuth() {
   const box = $('sideAuth');
   box.innerHTML = '';
+  const av = $('railAvatar');
+  if (av) {
+    const first = state.user && state.user.email ? state.user.email.trim().charAt(0) : 'К';
+    av.textContent = (first || 'К').toUpperCase();
+    av.title = state.user ? state.user.email : 'Войти или создать аккаунт';
+  }
   if (state.user) {
     const b = document.createElement('button');
     b.className = 'auth-btn' + (state.user.vip ? ' vip-on' : '');
@@ -816,7 +842,8 @@ function renderTierSelect() {
   document.querySelectorAll('#tierSelect button').forEach((b) => {
     b.classList.toggle('on', b.dataset.tier === current);
   });
-
+  const label = $('tierLabel');
+  if (label) label.textContent = tierLabel(current);
 }
 
 function applyTierModels(j) {
@@ -930,6 +957,28 @@ function bind() {
   });
   tap('input', 'input', resizeInput);
   on('toggleSidebar', () => document.body.classList.toggle('side-open'));
+  on('newChatRail', () => newChat(false));
+  on('drawerClose', () => document.body.classList.remove('side-open'));
+  on('railAvatar', () => {
+    if (state.user) document.body.classList.add('side-open');
+    else $('authModal').classList.remove('hidden');
+  });
+  on('btnInstall', installApp);
+  on('btnPlan', openVip);
+  on('tierBtn', () => {
+    const menu = $('tierSelect');
+    if (!menu) return;
+    const willOpen = menu.classList.contains('hidden');
+    menu.classList.toggle('hidden', !willOpen);
+    $('tierBtn').setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.tier-wrap')) closeTierMenu();
+    if (document.body.classList.contains('side-open') &&
+        !e.target.closest('#sidebar') && !e.target.closest('.rail')) {
+      document.body.classList.remove('side-open');
+    }
+  });
 
   // Настройки интерфейса
   on('btnSettings', openSettings);
@@ -956,6 +1005,7 @@ function bind() {
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     closeSettings();
+    closeTierMenu();
     document.body.classList.remove('side-open');
   });
   matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (ui.theme === 'system') applyUi(); });
@@ -964,6 +1014,7 @@ function bind() {
     if (!b || !state.settings) return;
     state.settings.tier = b.dataset.tier;
     renderTierSelect();
+    closeTierMenu();
     await fetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

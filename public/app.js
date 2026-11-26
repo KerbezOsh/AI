@@ -314,7 +314,12 @@ function messageNode(msg, question) {
   if (msg.search) bubble.appendChild(el('div', 'msg-attach', '🌐 поиск: ' + msg.search));
 
   const content = el('div', 'content');
-  content.innerHTML = md(msg.content);
+  // Пустой ответ модели (например, весь бюджет ушёл в размышления) не должен
+  // оставлять пустой бабл без объяснения.
+  const body = msg.role === 'assistant' && !String(msg.content || '').trim()
+    ? '_Модель не вернула текст ответа. Нажми «Ещё раз» или выбери другой режим._'
+    : msg.content;
+  content.innerHTML = md(body);
   bubble.appendChild(content);
 
   if (msg.role === 'assistant' && msg.content) {
@@ -568,6 +573,11 @@ async function streamReply(view, text, opts) {
     }
   } finally {
     state.controller = null;
+    // Если поток закрылся без единого символа ответа — показываем понятную подсказку.
+    if (!msg.content.trim() && state.messages.indexOf(msg) >= 0) {
+      msg.content = '_Модель не вернула текст ответа. Нажми «Ещё раз» или выбери другой режим._';
+      view.setContent(msg.content);
+    }
     setStreamingUI(false);
     view.finish();
     await loadChats();
@@ -665,18 +675,31 @@ function renderAuth() {
 }
 
 function openVip() {
-  if (!state.user) { $('authModal').classList.remove('hidden'); return; }
+  // «Сменить план» всегда показывает тарифы. Если гость — предлагаем войти
+  // прямо из окна, а не подменяем его формой входа.
   $('vipModal').classList.remove('hidden');
   const priceEl = $('vipPrice');
   const cEl = $('vipCountry');
+  const note = $('vipNote');
   priceEl.textContent = '49 сом / мес';
   cEl.textContent = '';
   fetch('/api/price').then((r) => r.json()).then((j) => {
     priceEl.textContent = j.price + ' ' + j.symbol + ' / мес';
     cEl.textContent = j.country && j.country !== 'KG' ? 'цена для твоей страны (' + j.country + ')' : '';
   }).catch(() => {});
-  if (state.user.vip) { $('vipCode').hidden = true; $('vipActivate').textContent = 'VIP уже активен ✓'; }
-  else { $('vipCode').hidden = false; $('vipActivate').textContent = 'Активировать промокод'; }
+  if (!state.user) {
+    $('vipCode').hidden = true;
+    $('vipActivate').textContent = 'Войти и активировать';
+    note.textContent = 'Войди или создай бесплатный аккаунт — после этого можно ввести промокод.';
+  } else if (state.user.vip) {
+    $('vipCode').hidden = true;
+    $('vipActivate').textContent = 'VIP уже активен ✓';
+    note.textContent = 'Подписка активна: Pro и глубокие размышления доступны.';
+  } else {
+    $('vipCode').hidden = false;
+    $('vipActivate').textContent = 'Активировать промокод';
+    note.textContent = 'Оплата пока по договорённости с Photonn — введи полученный промокод.';
+  }
 }
 
 let authMode = 'login';
@@ -706,7 +729,17 @@ function initAuthUI() {
       toast(authMode === 'register' ? 'Аккаунт создан' : 'Вход выполнен');
     } catch (e) { toast('Сеть недоступна'); }
   });
+  // Клик по затемнению закрывает окно — привычное поведение модалок.
+  for (const id of ['authModal', 'vipModal']) {
+    $(id).addEventListener('click', (e) => { if (e.target.id === id) $(id).classList.add('hidden'); });
+  }
   $('vipActivate').addEventListener('click', async () => {
+    if (!state.user) {
+      $('vipModal').classList.add('hidden');
+      $('authModal').classList.remove('hidden');
+      return;
+    }
+    if (state.user.vip) { $('vipModal').classList.add('hidden'); return; }
     const code = $('vipCode').value.trim();
     if (!code) { toast('Введи промокод'); return; }
     try {
@@ -1113,6 +1146,8 @@ function bind() {
     closeTierMenu();
     closeAttachMenu();
     $('installModal').classList.add('hidden');
+    $('vipModal').classList.add('hidden');
+    $('authModal').classList.add('hidden');
     document.body.classList.remove('side-open');
   });
   matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (ui.theme === 'system') applyUi(); });

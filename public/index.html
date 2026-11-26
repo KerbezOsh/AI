@@ -10,16 +10,16 @@
 <link rel='apple-touch-icon' href='/icon-192.png'>
 <meta name='apple-mobile-web-app-capable' content='yes'>
 <meta name='apple-mobile-web-app-title' content='photonnAI'>
-<link rel='stylesheet' href='/style.css?v=7'>
+<link rel='stylesheet' href='/style.css?v=11'>
 <script>
   // Тему ставим до первой отрисовки, иначе при светлой теме экран мигает чёрным.
   try {
-    var ui = JSON.parse(localStorage.getItem('photonn.ui') || '{}');
-    var t = ui.theme || 'dark';
+    var boot = JSON.parse(localStorage.getItem('photonn.ui') || '{}');
+    var t = boot.theme || 'dark';
     if (t === 'system') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
     document.documentElement.dataset.theme = t;
-    if (ui.size) document.documentElement.dataset.size = ui.size;
-    if (ui.compact) document.documentElement.classList.add('compact');
+    if (boot.size) document.documentElement.dataset.size = boot.size;
+    if (boot.compact) document.documentElement.classList.add('compact');
   } catch (e) {}
 </script>
 </head>
@@ -90,7 +90,7 @@
       <button class='primary wide' id='vipActivate'>Активировать VIP</button>
       <button class='ghost wide' id='adEarn'>🎬 Смотреть рекламу → 1 запрос Pro</button>
       <div id='adBox' class='hidden' style='min-height:110px;margin:8px 0'></div>
-      <div class='vip-note'>Оплата пока по договорённости с Photonn — введи полученный промокод.</div>
+      <div class='vip-note' id='vipNote'>Оплата пока по договорённости с Photonn — введи полученный промокод.</div>
     </div>
   </div>
 
@@ -126,7 +126,7 @@
         <div class='settings-label'>Поведение</div>
         <label class='switch-row'><span>Enter отправляет сообщение<small>Shift+Enter — перенос строки</small></span>
           <span class='switch'><input type='checkbox' id='optEnter'><i></i></span></label>
-        <label class='switch-row'><span>Показывать модель под ответом<small>Метка Easy / Medium / Pro</small></span>
+        <label class='switch-row'><span>Показывать модель под ответом<small>Метка Flash / Pro / Reasoning</small></span>
           <span class='switch'><input type='checkbox' id='optModelTag'><i></i></span></label>
         <label class='switch-row'><span>Компактный режим<small>Меньше отступов — больше текста на экране</small></span>
           <span class='switch'><input type='checkbox' id='optCompact'><i></i></span></label>
@@ -248,7 +248,7 @@
 (function () {
   if ('caches' in window) {
     caches.keys().then(function (ks) {
-      ks.forEach(function (k) { if (k.indexOf('photonn-v7') !== 0) caches.delete(k); });
+      ks.forEach(function (k) { if (k.indexOf('photonn-v11') !== 0) caches.delete(k); });
     }).catch(function () {});
   }
   if ('serviceWorker' in navigator) {
@@ -258,6 +258,6 @@
   }
 })();
 </script>
-<script src='/app.js?v=7'></script>
+<script src='/app.js?v=11'></script>
 </body>
 </html>

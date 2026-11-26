@@ -87,7 +87,30 @@ function md(src) {
     if (list !== t) { closeList(); out.push('<' + t + '>'); list = t; }
   };
 
+  // Таблицы: набор строк вида |a|b|, шапка отделена |---|---|.
+  let table = null;
+  const isSepRow = (cells) => cells.length > 0 && cells.every((c) => /^:?-{2,}:?$/.test(c.replace(/\s/g, '')));
+  const flushTable = () => {
+    if (!table) return;
+    const rows = table;
+    table = null;
+    if (!rows.length) return;
+    let head = null;
+    let body = rows;
+    if (rows.length > 1 && isSepRow(rows[1])) { head = rows[0]; body = rows.slice(2); }
+    let html = '<table>';
+    if (head) html += '<thead><tr>' + head.map((c) => '<th>' + inline(esc(c.trim())) + '</th>').join('') + '</tr></thead>';
+    html += '<tbody>';
+    for (const r of body) {
+      if (isSepRow(r)) continue;
+      html += '<tr>' + r.map((c) => '<td>' + inline(esc(c.trim())) + '</td>').join('') + '</tr>';
+    }
+    html += '</tbody></table>';
+    out.push(html);
+  };
+
   for (const raw of lines) {
+    if (table && !raw.trim().startsWith('|')) flushTable();
     if (raw.trim().startsWith('```')) {
       if (!inCode) {
         closePara(); closeList();
@@ -102,6 +125,13 @@ function md(src) {
 
     const line = raw.trim();
     if (!line) { closePara(); closeList(); continue; }
+
+    if (line.startsWith('|')) {
+      closePara(); closeList();
+      if (!table) table = [];
+      table.push(line.replace(/^\|/, '').replace(/\|$/, '').split('|'));
+      continue;
+    }
 
     if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) { closePara(); closeList(); out.push('<hr>'); continue; }
 
@@ -127,6 +157,7 @@ function md(src) {
   }
 
   if (inCode) out.push('<pre><code>' + esc(code.join('\n')) + '</code></pre>');
+  flushTable();
   closePara();
   closeList();
   return out.join('');
@@ -313,7 +344,7 @@ function setStreamingUI(on) {
   $('stop').hidden = !on;
 }
 
-async function streamReply(view, text) {
+async function streamReply(view, text, opts) {
   setStreamingUI(true);
   const controller = new AbortController();
   state.controller = controller;
@@ -331,7 +362,8 @@ async function streamReply(view, text) {
         image: state.pendingImage,
         web: state.webSearch,
         deep: state.deepMode,
-        adToken: state.adToken || undefined
+        adToken: state.adToken || undefined,
+        regen: Boolean(opts && opts.regen)
       }),
       signal: controller.signal
     });
@@ -403,6 +435,20 @@ async function streamReply(view, text) {
     view.finish();
     await loadChats();
   }
+}
+
+// «Ещё раз»: заново генерируем ответ на последний вопрос, не дублируя его.
+async function retryLast() {
+  if (state.streaming) return;
+  const lastUser = [...state.messages].reverse().find((m) => m.role === 'user');
+  if (!lastUser) { toast('Нет вопроса, на который отвечать'); return; }
+  if (state.messages.length && state.messages[state.messages.length - 1].role === 'assistant') state.messages.pop();
+  renderMessages();
+  const msg = { role: 'assistant', content: '', reasoning: '' };
+  state.messages.push(msg);
+  const view = appendStreamingMessage(msg);
+  await streamReply(view, lastUser.content, { regen: true });
+  loadChats();
 }
 
 async function send() {
@@ -598,6 +644,34 @@ function initTools() {
 
   $('btnPhoto').addEventListener('click', () => $('fileInput').click());
   $('btnCamera').addEventListener('click', () => $('cameraInput').click());
+
+  // Голосовой ввод: Web Speech API есть в Chrome, Edge и Safari — где нет, кнопку не показываем.
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SR) {
+    const mic = $('btnMic');
+    mic.hidden = false;
+    let rec = null;
+    mic.addEventListener('click', () => {
+      if (rec) { rec.stop(); return; }
+      rec = new SR();
+      rec.lang = 'ru-RU';
+      rec.interimResults = true;
+      rec.continuous = false;
+      const base = $('input').value.trim();
+      mic.classList.add('on');
+      rec.onresult = (ev) => {
+        let said = '';
+        for (let i = ev.resultIndex; i < ev.results.length; i++) said += ev.results[i][0].transcript;
+        $('input').value = (base ? base + ' ' : '') + said.trim();
+        resizeInput();
+      };
+      rec.onerror = (ev) => {
+        if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') toast('Браузер не дал доступ к микрофону');
+      };
+      rec.onend = () => { rec = null; mic.classList.remove('on'); $('input').focus(); };
+      try { rec.start(); } catch (e) { rec = null; mic.classList.remove('on'); }
+    });
+  }
   for (const inp of ['fileInput', 'cameraInput']) {
     $(inp).addEventListener('change', () => {
       const f = $(inp).files[0];
@@ -717,6 +791,15 @@ function addActions(bubble, msg, question) {
   copy.onclick = () => { navigator.clipboard.writeText(msg.content); toast('Скопировано'); };
   actions.appendChild(copy);
 
+  // «Ещё раз» — только у последнего ответа: сервер заменяет его, а не добавляет новый.
+  const isLast = state.messages[state.messages.length - 1] === msg;
+  if (msg.role === 'assistant' && isLast) {
+    const again = el('button', 'mini', 'Ещё раз');
+    again.title = 'Сгенерировать ответ заново';
+    again.onclick = () => retryLast();
+    actions.appendChild(again);
+  }
+
   if (msg.role === 'assistant') {
     const like = el('button', 'mini rate', '👍');
     const dislike = el('button', 'mini rate', '👎');
@@ -826,3 +909,10 @@ async function init() {
 }
 
 init();
+
+// Ставим сайт как приложение: service worker держит каркас для офлайна.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}

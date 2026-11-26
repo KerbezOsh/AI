@@ -5,6 +5,10 @@
 <meta name='viewport' content='width=device-width, initial-scale=1'>
 <title>photonnAI — ИИ-ассистент</title>
 <meta name='theme-color' content='#090a0c'>
+<link rel='manifest' href='/manifest.webmanifest'>
+<link rel='apple-touch-icon' href='/icon-192.png'>
+<meta name='apple-mobile-web-app-capable' content='yes'>
+<meta name='apple-mobile-web-app-title' content='photonnAI'>
 <link rel='stylesheet' href='/style.css'>
 </head>
 <body>
@@ -78,6 +82,7 @@
         <input type='file' id='fileInput' accept='image/png,image/jpeg,image/webp' hidden>
         <button class='tool' id='btnCamera' title='Сфотографировать и отправить'>📸</button>
         <input type='file' id='cameraInput' accept='image/*' capture='environment' hidden>
+        <button class='tool' id='btnMic' title='Голосовой ввод' hidden>🎙</button>
         <button class='tool' id='btnWeb' title='Веб-поиск: модель найдёт свежие данные'>🌐</button>
         <button class='tool' id='btnDeep' title='Глубокое размышление: максимум рассуждений'>🧠</button>
       </div>

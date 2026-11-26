@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang='ru'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>photonnAI — админка</title>
+<style>
+  :root { color-scheme: dark; }
+  body { background: #090a0c; color: #e9edf4; font-family: system-ui, sans-serif; margin: 0; padding: 24px; }
+  .card { max-width: 640px; margin: 0 auto; background: #111318; border: 1px solid #23262e; border-radius: 14px; padding: 20px; }
+  h1 { font-size: 20px; margin: 0 0 16px; }
+  input, button { font: inherit; border-radius: 9px; }
+  input { width: 100%; box-sizing: border-box; background: #0b0d11; color: #e9edf4; border: 1px solid #2a2e38; padding: 10px 12px; margin: 6px 0 12px; }
+  button { background: #2f5cff; color: #fff; border: 0; padding: 10px 16px; cursor: pointer; }
+  button.ghost { background: #1c1f27; color: #aab2c2; }
+  button.danger { background: #3a1620; color: #ff8ba0; }
+  .row { display: flex; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid #1c1f27; flex-wrap: wrap; }
+  .row code { color: #7ba2ff; font-size: 15px; }
+  .row .meta { color: #8b94a5; font-size: 13px; flex: 1; }
+  .muted { color: #8b94a5; font-size: 13px; }
+  .hidden { display: none; }
+  #msg { margin: 10px 0 0; min-height: 18px; font-size: 14px; }
+  #msg.err { color: #ff8ba0; }
+  #msg.ok { color: #7ee2a8; }
+</style>
+</head>
+<body>
+<div class='card'>
+  <h1>Промокоды photonnAI</h1>
+
+  <div id='login'>
+    <p class='muted'>Пароль администратора. По умолчанию — <code>photonn-admin</code>, смени его после первого входа.</p>
+    <input type='password' id='pass' placeholder='Пароль администратора'>
+    <button id='btnLogin'>Войти</button>
+    <p id='msg'></p>
+  </div>
+
+  <div id='panel' class='hidden'>
+    <input id='newCode' placeholder='Код, например SUMMER-2026' style='text-transform:uppercase'>
+    <input id='newMax' placeholder='Лимит активаций (0 = без лимита)' inputmode='numeric'>
+    <input id='newDays' placeholder='Срок действия в днях (0 = бессрочно)' inputmode='numeric'>
+    <button id='btnCreate'>Создать промокод</button>
+    <button class='ghost' id='btnReload'>Обновить</button>
+
+    <div id='list' style='margin-top:14px'></div>
+
+    <hr style='border:0;border-top:1px solid #1c1f27;margin:18px 0'>
+    <h1 style='font-size:16px'>Монетизация — реклама, которая платит тебе</h1>
+    <p class='muted'>Вставь свой Publisher ID из Google AdSense (вид: <code>ca-pub-1234567890123456</code>) — и реклама начнёт показываться в окне награды, а деньги пойдут на твой аккаунт AdSense. Пока поля пустые, пользователи видят тренировочный таймер.</p>
+    <input id='adClient' placeholder='ca-pub-… (Publisher ID из AdSense)'>
+    <input id='adSlot' placeholder='Slot ID рекламного блока (необязательно)'>
+    <button id='btnAds'>Сохранить настройки рекламы</button>
+    <p class='muted' id='adStats'></p>
+    <p class='muted' id='adMsg'></p>
+
+    <hr style='border:0;border-top:1px solid #1c1f27;margin:18px 0'>
+    <details>
+      <summary class='muted' style='cursor:pointer'>Сменить пароль администратора</summary>
+      <input type='password' id='newPass' placeholder='Новый пароль (мин. 6 символов)'>
+      <button id='btnPass'>Сменить пароль</button>
+    </details>
+    <p id='msg2'></p>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const msg = (id, text, cls) => { const e = $(id); e.textContent = text; e.className = cls || ''; };
+const shown = (p) => p.maxUses > 0 ? p.uses + ' / ' + p.maxUses : p.uses + ' (без лимита)';
+const expiry = (p) => p.expiresAt ? 'до ' + new Date(p.expiresAt).toLocaleString('ru-RU') + (Date.now() > p.expiresAt ? ' (истёк)' : '') : 'бессрочно';
+
+function renderList(promos) {
+  const codes = Object.keys(promos).sort();
+  $('list').innerHTML = '';
+  if (!codes.length) { $('list').innerHTML = "<p class='muted'>Промокодов пока нет — создай первый выше.</p>"; return; }
+  for (const code of codes) {
+    const p = promos[code];
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = "<code>" + code + "</code><span class='meta'>активаций: " + shown(p) + ' · ' + expiry(p) + '</span>';
+    const edit = document.createElement('button');
+    edit.className = 'ghost';
+    edit.textContent = 'Изменить';
+    edit.addEventListener('click', async () => {
+      const dRaw = prompt('Новый срок действия в днях (0 = бессрочно):', p.expiresAt ? Math.max(0, Math.ceil((p.expiresAt - Date.now()) / 86400000)) : 0);
+      if (dRaw === null) return;
+      const mRaw = prompt('Новый лимит активаций (0 = без лимита):', p.maxUses);
+      if (mRaw === null) return;
+      const j = await (await fetch('/api/admin/promos/edit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, expiresDays: Number(dRaw) || 0, maxUses: Number(mRaw) || 0 }) })).json();
+      if (j.error) alert(j.error);
+      renderList(j.promos || {});
+    });
+    row.appendChild(edit);
+    const del = document.createElement('button');
+    del.className = 'danger';
+    del.textContent = 'Удалить';
+    del.addEventListener('click', async () => {
+      const j = await (await fetch('/api/admin/promos/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) })).json();
+      renderList(j.promos || {});
+    });
+    row.appendChild(del);
+    $('list').appendChild(row);
+  }
+}
+
+async function loadPromos() {
+  const r = await fetch('/api/admin/promos');
+  if (r.status === 401) { $('login').classList.remove('hidden'); $('panel').classList.add('hidden'); return; }
+  const j = await r.json();
+  renderList(j.promos || {});
+}
+
+$('btnLogin').addEventListener('click', async () => {
+  const r = await fetch('/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: $('pass').value }) });
+  const j = await r.json();
+  if (!r.ok) return msg('msg', j.error || 'Ошибка', 'err');
+  $('pass').value = '';
+  $('login').classList.add('hidden');
+  $('panel').classList.remove('hidden');
+  loadPromos();
+});
+
+$('btnCreate').addEventListener('click', async () => {
+  const r = await fetch('/api/admin/promos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: $('newCode').value, maxUses: Number($('newMax').value) || 0, expiresDays: Number($('newDays').value) || 0 }) });
+  const j = await r.json();
+  if (!r.ok) return msg('msg2', j.error || 'Ошибка', 'err');
+  $('newCode').value = ''; $('newMax').value = '';
+  msg('msg2', 'Промокод создан ✓', 'ok');
+  renderList(j.promos || {});
+});
+
+$('btnReload').addEventListener('click', loadPromos);
+
+async function loadAds() {
+  const j = await (await fetch('/api/admin/ads')).json();
+  $('adClient').value = (j.ads && j.ads.client) || '';
+  $('adSlot').value = (j.ads && j.ads.slot) || '';
+  $('adStats').textContent = 'Просмотров рекламы: ' + (j.stats ? j.stats.views : 0) + ' · выдано бонусов Pro: ' + (j.stats ? j.stats.tokens : 0);
+}
+$('btnAds').addEventListener('click', async () => {
+  const r = await fetch('/api/admin/ads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ client: $('adClient').value.trim(), slot: $('adSlot').value.trim() }) });
+  const j = await r.json();
+  $('adMsg').textContent = r.ok ? 'Настройки рекламы сохранены ✓' : (j.error || 'Ошибка');
+  loadAds();
+});
+
+$('btnPass').addEventListener('click', async () => {
+  const r = await fetch('/api/admin/pass', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: $('newPass').value }) });
+  const j = await r.json();
+  msg('msg2', r.ok ? 'Пароль изменён ✓' : (j.error || 'Ошибка'), r.ok ? 'ok' : 'err');
+  if (r.ok) $('newPass').value = '';
+});
+
+loadPromos();
+loadAds();
+</script>
+</body>
+</html>

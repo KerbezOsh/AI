@@ -747,7 +747,7 @@ function initTools() {
   setToggle('btnWeb', 'webSearch', 'Веб-поиск: модель найдёт свежие данные');
   setToggle('btnDeep', 'deepMode', 'Глубокое размышление: максимум рассуждений');
 }
-initTools();
+try { initTools(); } catch (e) { console.warn('initTools:', e); }
 
 async function newChat(silent) {
   try {
@@ -920,44 +920,46 @@ async function saveInlineKey(input, status, button) {
 }
 
 function bind() {
-  $('newChat').onclick = () => newChat(false);
-  $('send').onclick = send;
-  $('stop').onclick = () => { if (state.controller) state.controller.abort(); };
-  $('input').addEventListener('keydown', (e) => {
+  const on = (id, fn) => { const n = $(id); if (n) n.onclick = fn; };
+  const tap = (id, ev, fn) => { const n = $(id); if (n) n.addEventListener(ev, fn); };
+  on('newChat', () => newChat(false));
+  on('send', send);
+  on('stop', () => { if (state.controller) state.controller.abort(); });
+  tap('input', 'keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && ui.enterSend) { e.preventDefault(); send(); }
   });
-  $('input').addEventListener('input', resizeInput);
-  $('toggleSidebar').onclick = () => document.body.classList.toggle('side-open');
+  tap('input', 'input', resizeInput);
+  on('toggleSidebar', () => document.body.classList.toggle('side-open'));
 
   // Настройки интерфейса
-  $('btnSettings').onclick = openSettings;
-  $('sideSettings').onclick = openSettings;
-  $('settingsClose').onclick = closeSettings;
-  $('settingsDone').onclick = closeSettings;
-  $('settingsModal').addEventListener('click', (e) => { if (e.target.id === 'settingsModal') closeSettings(); });
-  $('segTheme').addEventListener('click', (e) => {
+  on('btnSettings', openSettings);
+  on('sideSettings', openSettings);
+  on('settingsClose', closeSettings);
+  on('settingsDone', closeSettings);
+  tap('settingsModal', 'click', (e) => { if (e.target.id === 'settingsModal') closeSettings(); });
+  tap('segTheme', 'click', (e) => {
     const b = e.target.closest('button[data-theme]');
     if (!b) return;
     ui.theme = b.dataset.theme;
     saveUi(); applyUi();
   });
-  $('segSize').addEventListener('click', (e) => {
+  tap('segSize', 'click', (e) => {
     const b = e.target.closest('button[data-size]');
     if (!b) return;
     ui.size = b.dataset.size;
     saveUi(); applyUi();
   });
-  $('optEnter').addEventListener('change', (e) => { ui.enterSend = e.target.checked; saveUi(); });
-  $('optModelTag').addEventListener('change', (e) => { ui.modelTag = e.target.checked; saveUi(); applyUi(); });
-  $('optCompact').addEventListener('change', (e) => { ui.compact = e.target.checked; saveUi(); applyUi(); });
-  $('settingsReset').onclick = () => { Object.assign(ui, UI_DEFAULT); saveUi(); applyUi(); toast('Настройки сброшены'); };
+  tap('optEnter', 'change', (e) => { ui.enterSend = e.target.checked; saveUi(); });
+  tap('optModelTag', 'change', (e) => { ui.modelTag = e.target.checked; saveUi(); applyUi(); });
+  tap('optCompact', 'change', (e) => { ui.compact = e.target.checked; saveUi(); applyUi(); });
+  on('settingsReset', () => { Object.assign(ui, UI_DEFAULT); saveUi(); applyUi(); toast('Настройки сброшены'); });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     closeSettings();
     document.body.classList.remove('side-open');
   });
   matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (ui.theme === 'system') applyUi(); });
-  $('tierSelect').addEventListener('click', async (e) => {
+  tap('tierSelect', 'click', async (e) => {
     const b = e.target.closest('button[data-tier]');
     if (!b || !state.settings) return;
     state.settings.tier = b.dataset.tier;
@@ -986,6 +988,7 @@ async function init() {
     else renderMessages();
   } catch (e) {
     toast('Сервер не отвечает: ' + e.message);
+    renderMessages();
   }
   $('input').focus();
 }

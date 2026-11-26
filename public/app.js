@@ -336,13 +336,18 @@ async function streamReply(view, text) {
       signal: controller.signal
     });
 
-    if (res.ok) state.adToken = null;
+    // Токен тратится только на Pro/глубокий режим — при обычном Easy он не должен пропадать.
+    const usedToken = Boolean(state.adToken) && (state.settings.tier === 'pro' || state.deepMode);
+    if (res.ok && usedToken) state.adToken = null;
 
     if (!res.ok) {
       let message = 'Ошибка ' + res.status;
       let needVip = false;
+      // j объявлен снаружи try: раньше он был виден только внутри и обращение
+      // к j.needAuth падало с ReferenceError — окно входа не открывалось.
+      let j = null;
       try {
-        const j = await res.json();
+        j = await res.json();
         if (j && j.error) message = j.error;
         needVip = Boolean(j && j.needVip);
       } catch (e) {}
@@ -481,6 +486,7 @@ function openVip() {
     cEl.textContent = j.country && j.country !== 'KG' ? 'цена для твоей страны (' + j.country + ')' : '';
   }).catch(() => {});
   if (state.user.vip) { $('vipCode').hidden = true; $('vipActivate').textContent = 'VIP уже активен ✓'; }
+  else { $('vipCode').hidden = false; $('vipActivate').textContent = 'Активировать промокод'; }
 }
 
 let authMode = 'login';
@@ -618,12 +624,16 @@ function initTools() {
 initTools();
 
 async function newChat(silent) {
-  const r = await fetch('/api/chats', { method: 'POST' });
-  const j = await r.json();
-  state.currentId = j.chat.id;
-  state.messages = [];
-  await loadChats();
-  if (!silent) renderMessages();
+  try {
+    const r = await fetch('/api/chats', { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok || !j.chat) { toast((j && j.error) || 'Не удалось создать чат'); return null; }
+    state.currentId = j.chat.id;
+    state.messages = [];
+    await loadChats();
+    if (!silent) renderMessages();
+    return j.chat.id;
+  } catch (e) { toast('Нет связи с сервером'); return null; }
   $('input').focus();
 }
 

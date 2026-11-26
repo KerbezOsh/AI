@@ -387,8 +387,36 @@ input, textarea, select { font-family: inherit; color: var(--text); }
 }
 
 /* ---------- A-ADS sticky banner (unit 2463382) ---------- */
-body { padding-right: max(100px, 15%); }
+/* Адаптивное рекламное место по правилам A-ADS не может быть меньше 120×25 px,
+   поэтому колонка фиксированная (200 px), а не 15%: на узких экранах 15% давали ~100 px. */
+body { padding-right: 200px; }
 body:has(#aadsstickymwxj8cwh:checked) { padding-right: 0; }
-#aadsstickymwxj8cwh + div > div { pointer-events: none; }
+#aadsstickymwxj8cwh + div > div { width: 200px !important; min-width: 200px !important; pointer-events: none; }
+#aadsstickymwxj8cwh + div > div #frame { width: 100% !important; height: 100% !important; }
+#aadsstickymwxj8cwh + div > div #frame > iframe { width: 100% !important; height: 100% !important; min-width: 120px; min-height: 25px; }
 #aadsstickymwxj8cwh + div > div iframe,
 #aadsstickymwxj8cwh + div > div label { pointer-events: auto; }
+
+/* На телефоне правая колонка забирала пол-экрана — переносим баннер в нижнюю полосу.
+   Ширина 100% экрана и высота 70 px держат минимум A-ADS (120×25). */
+@media (max-width: 760px) {
+  body { padding-right: 0; padding-bottom: 70px; }
+  body:has(#aadsstickymwxj8cwh:checked) { padding-bottom: 0; }
+  .app { height: calc(100dvh - 70px); }
+  body:has(#aadsstickymwxj8cwh:checked) .app { height: 100dvh; }
+  #aadsstickymwxj8cwh + div > div {
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 70px !important;
+    top: auto !important;
+    bottom: 0 !important;
+    transform: none !important;
+  }
+  #aadsstickymwxj8cwh + div > div > label {
+    top: -22px !important;
+    bottom: auto !important;
+    left: auto !important;
+    right: 6px !important;
+  }
+  #aadsstickymwxj8cwh + div > div #frame > iframe { width: 100% !important; height: 100% !important; }
+}

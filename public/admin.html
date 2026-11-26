@@ -118,6 +118,7 @@ $('btnLogin').addEventListener('click', async () => {
   $('login').classList.add('hidden');
   $('panel').classList.remove('hidden');
   loadPromos();
+  loadAds();
 });
 
 $('btnCreate').addEventListener('click', async () => {
@@ -132,7 +133,9 @@ $('btnCreate').addEventListener('click', async () => {
 $('btnReload').addEventListener('click', loadPromos);
 
 async function loadAds() {
-  const j = await (await fetch('/api/admin/ads')).json();
+  const r = await fetch('/api/admin/ads');
+  if (!r.ok) return;
+  const j = await r.json();
   $('adClient').value = (j.ads && j.ads.client) || '';
   $('adSlot').value = (j.ads && j.ads.slot) || '';
   $('adStats').textContent = 'Просмотров рекламы: ' + (j.stats ? j.stats.views : 0) + ' · выдано бонусов Pro: ' + (j.stats ? j.stats.tokens : 0);

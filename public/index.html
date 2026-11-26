@@ -139,6 +139,23 @@
     </div>
   </div>
 
+  <div class='modal-back hidden' id='installModal'>
+    <div class='modal'>
+      <button class='modal-x' id='installClose' title='Закрыть'>✕</button>
+      <div class='logo big'>φ</div>
+      <h3>Скачать приложение</h3>
+      <p class='modal-sub'>photonnAI открывается в отдельном окне, без адресной строки, и работает офлайн.</p>
+      <button class='primary wide' id='installNow'>Установить приложение</button>
+      <div class='or'>или вручную</div>
+      <ul class='install-steps'>
+        <li><b>Chrome / Edge на компьютере</b> — значок установки в адресной строке или меню ⋮ → «Установить приложение».</li>
+        <li><b>Android</b> — меню ⋮ → «Добавить на главный экран».</li>
+        <li><b>iPhone / iPad</b> — «Поделиться» → «На экран „Домой“».</li>
+      </ul>
+      <div class='vip-note'>Если кнопка выше не сработала, браузер пока не предлагает установку — используйте ручной способ.</div>
+    </div>
+  </div>
+
   <main class='main'>
     <header class='topbar'>
       <div class='crumb' id='crumb'><b>Новый чат</b></div>
@@ -157,21 +174,29 @@
           <button class='tool' id='imgRemove' title='Убрать фото'>✕</button>
         </div>
         <div class='composer-box'>
-          <button class='tool plus' id='btnPhoto' title='Прикрепить фото — модель его проанализирует' aria-label='Прикрепить фото'>
-            <svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round'><path d='M12 5v14M5 12h14'/></svg>
-          </button>
+          <div class='attach-wrap'>
+            <button class='tool plus' id='btnPhoto' title='Добавить файл или фото' aria-label='Добавить файл или фото' aria-haspopup='true' aria-expanded='false'>
+              <svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round'><path d='M12 5v14M5 12h14'/></svg>
+            </button>
+            <div class='attach-menu hidden' id='attachMenu' role='menu'>
+              <button data-attach='file' role='menuitem'><span class='ico'>📄</span> Загрузить файл</button>
+              <button data-attach='image' role='menuitem'><span class='ico'>🖼</span> Добавить изображение</button>
+              <button data-attach='camera' role='menuitem'><span class='ico'>📷</span> Сделать фото</button>
+            </div>
+          </div>
           <input type='file' id='fileInput' accept='image/png,image/jpeg,image/webp' hidden>
+          <input type='file' id='anyFileInput' hidden>
           <input type='file' id='cameraInput' accept='image/*' capture='environment' hidden>
           <textarea id='input' rows='1' placeholder='Спросить photonnAI'></textarea>
           <div class='tier-wrap'>
-            <button class='tier-btn' id='tierBtn' aria-haspopup='true' aria-expanded='false' title='Уровень модели'>
+            <button class='tier-btn' id='tierBtn' aria-haspopup='true' aria-expanded='false' title='Модель: Pro, Flash или Reasoning'>
               <span id='tierLabel'>Pro</span>
               <svg class='chev' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>
             </button>
             <div class='tier-menu hidden' id='tierSelect' role='menu'>
-              <button data-tier='easy' role='menuitem'>Easy <small>быстро</small></button>
-              <button data-tier='medium' role='menuitem'>Medium <small>баланс</small></button>
-              <button data-tier='pro' role='menuitem'>Pro <small>максимум</small></button>
+              <button data-mode='reasoning' role='menuitem'><span>Reasoning</span> <small>думает дольше</small></button>
+              <button data-mode='pro' role='menuitem'><span>Pro</span> <small>максимум</small></button>
+              <button data-mode='flash' role='menuitem'><span>Flash</span> <small>быстро</small></button>
             </div>
           </div>
           <button class='tool' id='btnMic' title='Голосовой ввод' aria-label='Голосовой ввод' hidden>

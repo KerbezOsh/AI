@@ -17,7 +17,7 @@ const state = {
 
 // Настройки интерфейса живут на устройстве: тема, размер текста, поведение.
 const UI_KEY = 'photonn.ui';
-const UI_DEFAULT = { theme: 'dark', size: 'md', enterSend: true, modelTag: true, compact: false };
+const UI_DEFAULT = { theme: 'dark', size: 'md', enterSend: true, modelTag: true, compact: false, deep: false };
 const ui = Object.assign({}, UI_DEFAULT, (() => {
   try { return JSON.parse(localStorage.getItem(UI_KEY) || '{}'); } catch (e) { return {}; }
 })());
@@ -207,9 +207,49 @@ function md(src) {
   return out.join('');
 }
 
+// Режимы модели: в меню три понятных варианта, оба реально влияют на запрос.
+const MODES = {
+  reasoning: { tier: 'pro', deep: true, label: 'Reasoning' },
+  pro: { tier: 'pro', deep: false, label: 'Pro' },
+  flash: { tier: 'easy', deep: false, label: 'Flash' }
+};
+
+function currentMode() {
+  const tier = (state.settings && state.settings.tier) || 'pro';
+  if (tier === 'easy') return 'flash';
+  if (tier === 'pro') return state.deepMode ? 'reasoning' : 'pro';
+  return 'standard';
+}
+
+function modeLabel() {
+  const mode = currentMode();
+  return mode === 'standard' ? 'Standard' : MODES[mode].label;
+}
+
 function tierLabel(id) {
   const name = id || 'pro';
+  if (name === 'easy') return 'Flash';
   return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+// Выбранный режим сохраняется: уровень уходит на сервер, глубокое размышление — на устройство.
+async function applyMode(mode) {
+  const conf = MODES[mode];
+  if (!conf || !state.settings) return;
+  state.settings.tier = conf.tier;
+  state.deepMode = conf.deep;
+  ui.deep = conf.deep;
+  saveUi();
+  setToggle('btnDeep', 'deepMode', state.deepMode ? 'Глубокое размышление включено' : 'Глубокое размышление: максимум рассуждений');
+  renderTierSelect();
+  closeTierMenu();
+  try {
+    await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tier: conf.tier })
+    });
+  } catch (e) {}
 }
 
 function setStageEmpty(empty) {
@@ -289,7 +329,7 @@ function messageNode(msg, question) {
 
 function welcomeNode() {
   const w = el('div', 'welcome');
-  w.appendChild(el('h1', null, 'С чего начнем?'));
+  w.appendChild(el('h1', null, 'С чего начнём?'));
 
   if (!state.hasKey) {
     const p = el('p', 'hint', 'Один раз вставь API-ключ NVIDIA — дальше всё работает само.');
@@ -305,7 +345,33 @@ function welcomeNode() {
     row.append(input, save);
     w.append(p, row, status);
   }
+
+  const cards = el('div', 'welcome-cards');
+  [
+    ['✎', 'Написать текст', 'Письмо клиенту о задержке, вежливо и коротко'],
+    ['◇', 'Разобрать задачу', 'План подготовки к экзамену на 5 дней'],
+    ['⌘', 'Объяснить код', 'Что делает эта функция и где в ней ошибка'],
+    ['🌐', 'Сравнить и решить', 'Два подхода к задаче: плюсы, минусы, вывод']
+  ].forEach(([ico, title, prompt]) => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'wcard';
+    card.append(el('span', 'wcard-ico', ico), el('b', null, title), el('small', null, prompt));
+    card.onclick = () => usePrompt(prompt);
+    cards.appendChild(card);
+  });
+  w.appendChild(cards);
   return w;
+}
+
+// Клик по подсказке сразу кладёт готовый промт в поле ввода и ставит курсор в конец.
+function usePrompt(text) {
+  const input = $('input');
+  if (!input) return;
+  input.value = text;
+  resizeInput();
+  input.focus();
+  input.setSelectionRange(text.length, text.length);
 }
 
 function updateCrumb() {
@@ -718,9 +784,24 @@ function handleNeedVip() {
 function initTools() {
   state.pendingImage = null;
   state.webSearch = false;
-  state.deepMode = false;
+  state.deepMode = Boolean(ui.deep);
 
-  $('btnPhoto').addEventListener('click', () => $('fileInput').click());
+  $('btnPhoto').addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeTierMenu();
+    const menu = $('attachMenu');
+    const willOpen = menu.classList.contains('hidden');
+    menu.classList.toggle('hidden', !willOpen);
+    $('btnPhoto').setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+  });
+  $('attachMenu').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-attach]');
+    if (!b) return;
+    closeAttachMenu();
+    if (b.dataset.attach === 'file') $('anyFileInput').click();
+    else if (b.dataset.attach === 'image') $('fileInput').click();
+    else $('cameraInput').click();
+  });
   $('btnCamera').addEventListener('click', () => $('cameraInput').click());
 
   // Голосовой ввод: Web Speech API есть в Chrome, Edge и Safari — где нет, кнопку не показываем.
@@ -750,11 +831,16 @@ function initTools() {
       try { rec.start(); } catch (e) { rec = null; mic.classList.remove('on'); }
     });
   }
-  for (const inp of ['fileInput', 'cameraInput']) {
+  for (const inp of ['fileInput', 'cameraInput', 'anyFileInput']) {
     $(inp).addEventListener('change', () => {
       const f = $(inp).files[0];
       if (!f) return;
-      if (f.size > 6 * 1024 * 1024) { toast('Фото больше 6 МБ — выбери поменьше'); return; }
+      if (!/^image\//.test(f.type)) {
+        toast('Сейчас модель читает только изображения: PNG, JPEG или WebP');
+        $(inp).value = '';
+        return;
+      }
+      if (f.size > 6 * 1024 * 1024) { toast('Фото больше 6 МБ — выбери поменьше'); $(inp).value = ''; return; }
       const r = new FileReader();
       r.onload = () => setPendingImage(String(r.result));
       r.readAsDataURL(f);
@@ -768,10 +854,25 @@ function initTools() {
   });
   $('btnDeep').addEventListener('click', () => {
     state.deepMode = !state.deepMode;
+    ui.deep = state.deepMode;
+    saveUi();
     setToggle('btnDeep', 'deepMode', state.deepMode ? 'Глубокое размышление включено' : 'Глубокое размышление: максимум рассуждений');
+    renderTierSelect();
   });
   setToggle('btnWeb', 'webSearch', 'Веб-поиск: модель найдёт свежие данные');
-  setToggle('btnDeep', 'deepMode', 'Глубокое размышление: максимум рассуждений');
+  setToggle('btnDeep', 'deepMode', state.deepMode ? 'Глубокое размышление включено' : 'Глубокое размышление: максимум рассуждений');
+}
+
+function closeAttachMenu() {
+  const menu = $('attachMenu');
+  const btn = $('btnPhoto');
+  if (menu) menu.classList.add('hidden');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+function openInstall() {
+  const modal = $('installModal');
+  if (modal) modal.classList.remove('hidden');
 }
 try { initTools(); } catch (e) { console.warn('initTools:', e); }
 
@@ -838,12 +939,12 @@ function renderChatList() {
 }
 
 function renderTierSelect() {
-  const current = (state.settings && state.settings.tier) || 'pro';
+  const mode = currentMode();
   document.querySelectorAll('#tierSelect button').forEach((b) => {
-    b.classList.toggle('on', b.dataset.tier === current);
+    b.classList.toggle('on', b.dataset.mode === mode);
   });
   const label = $('tierLabel');
-  if (label) label.textContent = tierLabel(current);
+  if (label) label.textContent = modeLabel();
 }
 
 function applyTierModels(j) {
@@ -963,17 +1064,21 @@ function bind() {
     if (state.user) document.body.classList.add('side-open');
     else $('authModal').classList.remove('hidden');
   });
-  on('btnInstall', installApp);
+  on('btnInstall', openInstall);
+  on('installClose', () => $('installModal').classList.add('hidden'));
+  on('installNow', installApp);
   on('btnPlan', openVip);
   on('tierBtn', () => {
     const menu = $('tierSelect');
     if (!menu) return;
+    closeAttachMenu();
     const willOpen = menu.classList.contains('hidden');
     menu.classList.toggle('hidden', !willOpen);
     $('tierBtn').setAttribute('aria-expanded', willOpen ? 'true' : 'false');
   });
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.tier-wrap')) closeTierMenu();
+    if (!e.target.closest('.attach-wrap')) closeAttachMenu();
     if (document.body.classList.contains('side-open') &&
         !e.target.closest('#sidebar') && !e.target.closest('.rail')) {
       document.body.classList.remove('side-open');
@@ -1006,20 +1111,15 @@ function bind() {
     if (e.key !== 'Escape') return;
     closeSettings();
     closeTierMenu();
+    closeAttachMenu();
+    $('installModal').classList.add('hidden');
     document.body.classList.remove('side-open');
   });
   matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (ui.theme === 'system') applyUi(); });
-  tap('tierSelect', 'click', async (e) => {
-    const b = e.target.closest('button[data-tier]');
-    if (!b || !state.settings) return;
-    state.settings.tier = b.dataset.tier;
-    renderTierSelect();
-    closeTierMenu();
-    await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tier: state.settings.tier })
-    });
+  tap('tierSelect', 'click', (e) => {
+    const b = e.target.closest('button[data-mode]');
+    if (!b) return;
+    applyMode(b.dataset.mode);
   });
 }
 

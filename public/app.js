@@ -15,6 +15,50 @@ const state = {
   controller: null
 };
 
+// Настройки интерфейса живут на устройстве: тема, размер текста, поведение.
+const UI_KEY = 'photonn.ui';
+const UI_DEFAULT = { theme: 'dark', size: 'md', enterSend: true, modelTag: true, compact: false };
+const ui = Object.assign({}, UI_DEFAULT, (() => {
+  try { return JSON.parse(localStorage.getItem(UI_KEY) || '{}'); } catch (e) { return {}; }
+})());
+
+function saveUi() {
+  try { localStorage.setItem(UI_KEY, JSON.stringify(ui)); } catch (e) {}
+}
+
+function applyUi() {
+  const theme = ui.theme === 'system'
+    ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+    : (ui.theme === 'light' ? 'light' : 'dark');
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.dataset.size = ui.size || 'md';
+  document.body.classList.toggle('compact', Boolean(ui.compact));
+  document.body.classList.toggle('hide-model-tag', !ui.modelTag);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', theme === 'light' ? '#f6f7fa' : '#0a0b0e');
+  renderSettingsState();
+}
+
+function renderSettingsState() {
+  const theme = $('segTheme');
+  if (theme) theme.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.theme === ui.theme));
+  const size = $('segSize');
+  if (size) size.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.size === (ui.size || 'md')));
+  if ($('optEnter')) $('optEnter').checked = Boolean(ui.enterSend);
+  if ($('optModelTag')) $('optModelTag').checked = Boolean(ui.modelTag);
+  if ($('optCompact')) $('optCompact').checked = Boolean(ui.compact);
+}
+
+function openSettings() {
+  renderSettingsState();
+  $('settingsModal').classList.remove('hidden');
+  document.body.classList.remove('side-open');
+}
+
+function closeSettings() {
+  $('settingsModal').classList.add('hidden');
+}
+
 function el(tag, cls, text) {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -234,12 +278,12 @@ function welcomeNode() {
   } else {
     const tips = el('div', 'tips');
     [
-      ['Код', 'Написать, объяснить, найти ошибку'],
-      ['Учёба', 'Экзамены, задачи, конспекты'],
-      ['Тексты', 'Письма, планы, редактура']
-    ].forEach(([title, sub]) => {
+      ['⌘', 'Код', 'Написать, объяснить, найти ошибку'],
+      ['◇', 'Учёба', 'Экзамены, задачи, конспекты'],
+      ['✎', 'Тексты', 'Письма, планы, редактура']
+    ].forEach(([ico, title, sub]) => {
       const card = el('div', 'tip');
-      card.append(el('b', null, title), el('span', null, sub));
+      card.append(el('span', 'tip-ico', ico), el('b', null, title), el('span', null, sub));
       tips.appendChild(card);
     });
     w.appendChild(tips);
@@ -247,9 +291,17 @@ function welcomeNode() {
   return w;
 }
 
+function updateCrumb() {
+  const box = $('crumb');
+  if (!box) return;
+  const chat = state.chats.find((c) => c.id === state.currentId);
+  box.textContent = chat ? chat.title : 'Новый чат';
+}
+
 function renderMessages() {
   const box = $('messages');
   box.innerHTML = '';
+  updateCrumb();
   if (!state.messages.length) { box.appendChild(welcomeNode()); return; }
   let question = '';
   for (const m of state.messages) {
@@ -754,7 +806,7 @@ function renderChatList() {
     };
 
     item.append(del);
-    item.onclick = () => openChat(c.id);
+    item.onclick = () => { openChat(c.id); document.body.classList.remove('side-open'); };
     box.appendChild(item);
   }
 }
@@ -872,10 +924,39 @@ function bind() {
   $('send').onclick = send;
   $('stop').onclick = () => { if (state.controller) state.controller.abort(); };
   $('input').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    if (e.key === 'Enter' && !e.shiftKey && ui.enterSend) { e.preventDefault(); send(); }
   });
   $('input').addEventListener('input', resizeInput);
   $('toggleSidebar').onclick = () => document.body.classList.toggle('side-open');
+
+  // Настройки интерфейса
+  $('btnSettings').onclick = openSettings;
+  $('sideSettings').onclick = openSettings;
+  $('settingsClose').onclick = closeSettings;
+  $('settingsDone').onclick = closeSettings;
+  $('settingsModal').addEventListener('click', (e) => { if (e.target.id === 'settingsModal') closeSettings(); });
+  $('segTheme').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-theme]');
+    if (!b) return;
+    ui.theme = b.dataset.theme;
+    saveUi(); applyUi();
+  });
+  $('segSize').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-size]');
+    if (!b) return;
+    ui.size = b.dataset.size;
+    saveUi(); applyUi();
+  });
+  $('optEnter').addEventListener('change', (e) => { ui.enterSend = e.target.checked; saveUi(); });
+  $('optModelTag').addEventListener('change', (e) => { ui.modelTag = e.target.checked; saveUi(); applyUi(); });
+  $('optCompact').addEventListener('change', (e) => { ui.compact = e.target.checked; saveUi(); applyUi(); });
+  $('settingsReset').onclick = () => { Object.assign(ui, UI_DEFAULT); saveUi(); applyUi(); toast('Настройки сброшены'); };
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    closeSettings();
+    document.body.classList.remove('side-open');
+  });
+  matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (ui.theme === 'system') applyUi(); });
   $('tierSelect').addEventListener('click', async (e) => {
     const b = e.target.closest('button[data-tier]');
     if (!b || !state.settings) return;
@@ -890,6 +971,7 @@ function bind() {
 }
 
 async function init() {
+  applyUi();
   bind();
   try {
     const st = await (await fetch('/api/state')).json();

@@ -4,12 +4,24 @@
 <meta charset='utf-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1'>
 <title>photonnAI — ИИ-ассистент</title>
-<meta name='theme-color' content='#090a0c'>
+<meta name='theme-color' content='#0a0b0e'>
+<link rel='icon' href='/icon-192.png'>
 <link rel='manifest' href='/manifest.webmanifest'>
 <link rel='apple-touch-icon' href='/icon-192.png'>
 <meta name='apple-mobile-web-app-capable' content='yes'>
 <meta name='apple-mobile-web-app-title' content='photonnAI'>
 <link rel='stylesheet' href='/style.css'>
+<script>
+  // Тему ставим до первой отрисовки, иначе при светлой теме экран мигает чёрным.
+  try {
+    var ui = JSON.parse(localStorage.getItem('photonn.ui') || '{}');
+    var t = ui.theme || 'dark';
+    if (t === 'system') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    document.documentElement.dataset.theme = t;
+    if (ui.size) document.documentElement.dataset.size = ui.size;
+    if (ui.compact) document.documentElement.classList.add('compact');
+  } catch (e) {}
+</script>
 </head>
 <body>
 <div class='app' id='app'>
@@ -21,9 +33,11 @@
         <div class='brand-sub'>персональный ИИ · NVIDIA</div>
       </div>
     </div>
-    <button class='new-chat' id='newChat'>+ Новый чат</button>
+    <button class='new-chat' id='newChat'>Новый чат</button>
+    <div class='list-label'>История</div>
     <div class='chat-list' id='chatList'></div>
     <div class='sidebar-foot'>
+      <button class='side-settings' id='sideSettings'><span class='ico'>⚙</span> Настройки</button>
       <div class='key-state' id='learnState'>Оценок: 0 · фактов: 0</div>
     </div>
     <div class='side-auth' id='sideAuth'></div>
@@ -63,15 +77,65 @@
     </div>
   </div>
 
+  <div class='modal-back hidden' id='settingsModal'>
+    <div class='modal'>
+      <button class='modal-x' id='settingsClose' title='Закрыть'>✕</button>
+      <div class='settings-head'>
+        <div>
+          <h3>Настройки</h3>
+          <p>Сохраняются на этом устройстве</p>
+        </div>
+      </div>
+
+      <div class='settings-group'>
+        <div class='settings-label'>Тема</div>
+        <div class='seg' id='segTheme'>
+          <button data-theme='dark'>Тёмная</button>
+          <button data-theme='light'>Светлая</button>
+          <button data-theme='system'>Как в системе</button>
+        </div>
+      </div>
+
+      <div class='settings-group'>
+        <div class='settings-label'>Размер текста</div>
+        <div class='seg' id='segSize'>
+          <button data-size='sm'>Мелкий</button>
+          <button data-size='md'>Обычный</button>
+          <button data-size='lg'>Крупный</button>
+        </div>
+      </div>
+
+      <div class='settings-group'>
+        <div class='settings-label'>Поведение</div>
+        <label class='switch-row'><span>Enter отправляет сообщение<small>Shift+Enter — перенос строки</small></span>
+          <span class='switch'><input type='checkbox' id='optEnter'><i></i></span></label>
+        <label class='switch-row'><span>Показывать модель под ответом<small>Метка Easy / Medium / Pro</small></span>
+          <span class='switch'><input type='checkbox' id='optModelTag'><i></i></span></label>
+        <label class='switch-row'><span>Компактный режим<small>Меньше отступов — больше текста на экране</small></span>
+          <span class='switch'><input type='checkbox' id='optCompact'><i></i></span></label>
+      </div>
+
+      <div class='settings-actions'>
+        <button class='secondary' id='settingsReset'>Сбросить</button>
+        <button class='primary' id='settingsDone'>Готово</button>
+      </div>
+    </div>
+  </div>
+
   <main class='main'>
     <header class='topbar'>
-      <button class='icon' id='toggleSidebar' title='Меню'>☰</button>
+      <div class='topbar-left'>
+        <button class='icon' id='toggleSidebar' title='Меню'>☰</button>
+        <div class='crumb' id='crumb'><b>Новый чат</b></div>
+      </div>
       <div class='tier-select' id='tierSelect'>
         <button data-tier='easy' title='Быстрая модель для простых вопросов'>Easy</button>
         <button data-tier='medium' title='Сбалансированная модель'>Medium</button>
         <button data-tier='pro' title='Максимум качества для сложных задач'>Pro</button>
       </div>
-
+      <div class='topbar-right'>
+        <button class='icon gear' id='btnSettings' title='Настройки'>⚙</button>
+      </div>
     </header>
 
     <div class='messages' id='messages'></div>

@@ -300,6 +300,17 @@ body.side-open::before {
   color: var(--accent);
 }
 .pill.accent:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+/* Discord в шапке: фирменный цвет, но текст остаётся читаемым в обеих темах. */
+.pill.discord {
+  border-color: rgba(88, 101, 242, 0.48);
+  background: rgba(88, 101, 242, 0.13);
+  color: var(--text);
+  text-decoration: none;
+}
+.pill.discord svg { color: #5865f2; flex: 0 0 auto; }
+.pill.discord:hover { background: rgba(88, 101, 242, 0.22); border-color: #5865f2; color: var(--text); }
+a.discord-link { text-decoration: none; }
+a.discord-link:hover { color: #8f9bff; background: rgba(88, 101, 242, 0.14); }
 
 /* уровень модели — выпадающий селектор в поле ввода */
 .tier-wrap { position: relative; flex: 0 0 auto; }
@@ -747,6 +758,8 @@ body.compact .content { line-height: 1.55; }
   .topbar { padding: 0 10px; }
   .topbar-right { gap: 6px; }
   .pill { height: 30px; padding: 0 10px; font-size: 11.5px; }
+  .pill.discord { padding: 0 9px; }
+  .discord-label { display: none; }
   .composer-box { gap: 4px; padding: 6px; border-radius: 22px; }
   #input { font-size: 14px; }
   .tier-btn { height: 30px; padding: 0 8px 0 10px; font-size: 12px; }

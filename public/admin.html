@@ -185,6 +185,7 @@ tbody tr:hover{background:rgba(255,255,255,.018)}
       <button data-view='overview' class='on'><span class='ni'>◫</span><span>Обзор</span></button>
       <button data-view='users'><span class='ni'>♙</span><span>Пользователи</span></button>
       <button data-view='ads'><span class='ni'>▤</span><span>Реклама</span></button>
+      <button data-view='promos'><span class='ni'>⌘</span><span>Промокоды</span></button>
     </nav>
     <div class='side-foot'>
       <a class='side-link' href='/' target='_blank' rel='noopener'><span>↗</span><span>Открыть сайт</span></a>
@@ -238,6 +239,33 @@ tbody tr:hover{background:rgba(255,255,255,.018)}
         </div>
       </div>
     </section>
+    <section id='viewPromos' class='hidden'>
+      <div class='ads-grid'>
+        <div class='panel'>
+          <div class='panel-head'><h2 id='promoFormTitle'>Новый промокод</h2><span id='promoFormHint'>код, тариф и срок</span></div>
+          <div class='panel-body'>
+            <div class='grid2'>
+              <div class='form-row'><label for='promoCode'>Код</label><input class='field' id='promoCode' maxlength='32' placeholder='NYX2026'><small>4–32 символа: латиница, цифры, дефис.</small></div>
+              <div class='form-row'><label for='promoPlan'>Тариф</label><select class='field' id='promoPlan'><option value='pro'>Pro</option><option value='ultra'>Ultra</option></select></div>
+            </div>
+            <div class='grid2'>
+              <div class='form-row'><label for='promoDays'>Подписка, дней</label><input class='field' id='promoDays' type='number' min='1' max='3650' value='30'><div class='chips'><button class='chip' data-promodays='7'>7 дней</button><button class='chip' data-promodays='30'>30 дней</button><button class='chip' data-promodays='90'>90 дней</button><button class='chip' data-promodays='365'>1 год</button></div></div>
+              <div class='form-row'><label for='promoUses'>Лимит активаций</label><input class='field' id='promoUses' type='number' min='0' max='100000' value='0'><small>0 — без ограничения.</small></div>
+            </div>
+            <div class='grid2'>
+              <div class='form-row'><label for='promoExpireDays'>Срок кода, дней</label><input class='field' id='promoExpireDays' type='number' min='0' max='3650' value='0'><small>0 — бессрочно. Отсчёт от создания.</small></div>
+              <div class='form-row'><label for='promoExpireDate'>Или до даты</label><input class='field' id='promoExpireDate' type='date'><small>Дата важнее количества дней.</small></div>
+            </div>
+            <div class='btn-row'><button class='btn primary' id='savePromo'>Создать промокод</button><button class='btn' id='resetPromo'>Очистить</button></div>
+          </div>
+        </div>
+        <div class='panel'>
+          <div class='panel-head'><h2>Все коды</h2><span id='promoCount'></span></div>
+          <div class='table-wrap'><table><thead><tr><th>Код</th><th>Тариф</th><th>Подписка</th><th>Активации</th><th>Срок кода</th><th>Статус</th><th style='text-align:right'>Действия</th></tr></thead><tbody id='promosBody'></tbody></table></div>
+          <div class='empty hidden' id='promosEmpty'>Пока нет промокодов. Создай первый слева.</div>
+        </div>
+      </div>
+    </section>
   </main>
 </div>
 <div class='modal-back hidden' id='userModal'>
@@ -278,7 +306,7 @@ tbody tr:hover{background:rgba(255,255,255,.018)}
 (function(){
   'use strict';
   const $ = (id) => document.getElementById(id);
-  const state = { users: [], stats: {}, plans: {}, ads: {}, view: 'overview', query: '', status: 'all', plan: 'all', current: null };
+  const state = { users: [], stats: {}, plans: {}, ads: {}, promos: {}, view: 'overview', query: '', status: 'all', plan: 'all', current: null, editingPromo: '' };
   let toastTimer = null;
   function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
   function toast(text, error) {
@@ -329,10 +357,12 @@ tbody tr:hover{background:rgba(255,255,255,.018)}
     $('viewOverview').classList.toggle('hidden', view !== 'overview');
     $('viewUsers').classList.toggle('hidden', view !== 'users');
     $('viewAds').classList.toggle('hidden', view !== 'ads');
-    $('pageTitle').textContent = view === 'users' ? 'Пользователи' : view === 'ads' ? 'Реклама' : 'Обзор';
-    $('pageSub').textContent = view === 'users' ? 'Тарифы, подписки и блокировки' : view === 'ads' ? 'Видимость рекламы на сайте' : 'Ключевые показатели photonnAI';
+    $('viewPromos').classList.toggle('hidden', view !== 'promos');
+    $('pageTitle').textContent = view === 'users' ? 'Пользователи' : view === 'ads' ? 'Реклама' : view === 'promos' ? 'Промокоды' : 'Обзор';
+    $('pageSub').textContent = view === 'users' ? 'Тарифы, подписки и блокировки' : view === 'ads' ? 'Видимость рекламы на сайте' : view === 'promos' ? 'Коды на Pro и Ultra со сроком действия' : 'Ключевые показатели photonnAI';
     if (view === 'users') renderUsers();
     if (view === 'ads') renderAds();
+    if (view === 'promos') { renderPromos(); loadPromos(); }
   }
   function renderStats() {
     const s = state.stats || {};
@@ -386,6 +416,97 @@ tbody tr:hover{background:rgba(255,255,255,.018)}
     $('adsClient').value = (state.ads && state.ads.client) || '';
     $('adsSlot').value = (state.ads && state.ads.slot) || '';
   }
+  function promoState(p) {
+    if (Number(p.expiresAt) && Date.now() > Number(p.expiresAt)) return { cls: 'banned', label: 'истёк' };
+    if (Number(p.maxUses) > 0 && (Number(p.uses) || 0) >= Number(p.maxUses)) return { cls: 'free', label: 'лимит' };
+    return { cls: 'active', label: 'активен' };
+  }
+  function renderPromos() {
+    const list = Object.keys(state.promos || {}).map((code) => Object.assign({ code }, state.promos[code]))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    $('promoCount').textContent = list.length ? list.length + ' шт.' : '';
+    $('promosEmpty').classList.toggle('hidden', list.length > 0);
+    $('promosBody').innerHTML = list.map((p) => {
+      const st = promoState(p);
+      const uses = Number(p.uses) || 0;
+      const limit = Number(p.maxUses) || 0;
+      const plan = p.plan === 'ultra' ? 'ultra' : 'pro';
+      return '<tr>' +
+        '<td class="mono">' + esc(p.code) + '</td>' +
+        '<td><span class="badge ' + plan + '">' + (plan === 'ultra' ? 'Ultra' : 'Pro') + '</span></td>' +
+        '<td>' + (Number(p.days) || 30) + ' дн.</td>' +
+        '<td>' + uses + ' / ' + (limit || '∞') + '</td>' +
+        '<td class="sub-until">' + esc(Number(p.expiresAt) ? fmtDate(p.expiresAt) : 'бессрочно') + '</td>' +
+        '<td><span class="badge ' + st.cls + '"><i></i>' + st.label + '</span></td>' +
+        '<td class="actions-cell"><button class="btn" data-editpromo="' + esc(p.code) + '">Изменить</button> <button class="btn danger" data-delpromo="' + esc(p.code) + '">Удалить</button></td>' +
+      '</tr>';
+    }).join('');
+  }
+  async function loadPromos() {
+    try {
+      const j = await api('/api/admin/promos');
+      state.promos = j.promos || {};
+      renderPromos();
+    } catch (e) { toast(e.message, true); }
+  }
+  function resetPromoForm() {
+    state.editingPromo = '';
+    $('promoCode').value = '';
+    $('promoCode').disabled = false;
+    $('promoPlan').value = 'pro';
+    $('promoDays').value = 30;
+    $('promoUses').value = 0;
+    $('promoExpireDays').value = 0;
+    $('promoExpireDate').value = '';
+    $('promoFormTitle').textContent = 'Новый промокод';
+    $('savePromo').textContent = 'Создать промокод';
+  }
+  function editPromo(code) {
+    const p = (state.promos || {})[code];
+    if (!p) return;
+    state.editingPromo = code;
+    $('promoCode').value = code;
+    $('promoCode').disabled = true;
+    $('promoPlan').value = p.plan === 'ultra' ? 'ultra' : 'pro';
+    $('promoDays').value = Number(p.days) || 30;
+    $('promoUses').value = Number(p.maxUses) || 0;
+    $('promoExpireDate').value = '';
+    $('promoExpireDays').value = Number(p.expiresAt) ? Math.max(0, Math.ceil((Number(p.expiresAt) - Date.now()) / 86400000)) : 0;
+    $('promoFormTitle').textContent = 'Код ' + code;
+    $('savePromo').textContent = 'Сохранить';
+  }
+  async function savePromo() {
+    const code = $('promoCode').value.trim().toUpperCase();
+    if (!/^[A-Z0-9-]{4,32}$/.test(code)) { toast('Код: 4–32 символа — латиница, цифры, дефис', true); return; }
+    const until = parseDateValue($('promoExpireDate').value);
+    const body = {
+      code,
+      plan: $('promoPlan').value,
+      days: Math.max(1, Math.min(3650, parseInt($('promoDays').value, 10) || 30)),
+      maxUses: Math.max(0, Math.min(100000, parseInt($('promoUses').value, 10) || 0))
+    };
+    if (until) body.expiresAt = until;
+    else body.expiresDays = Math.max(0, Math.min(3650, parseInt($('promoExpireDays').value, 10) || 0));
+    const btn = $('savePromo'); btn.disabled = true;
+    try {
+      const path = state.editingPromo ? '/api/admin/promos/edit' : '/api/admin/promos';
+      const j = await api(path, { method: 'POST', body: JSON.stringify(body) });
+      state.promos = j.promos || {};
+      renderPromos();
+      toast(state.editingPromo ? 'Промокод обновлён' : 'Промокод создан: ' + code);
+      resetPromoForm();
+    } catch (e) { toast(e.message, true); } finally { btn.disabled = false; }
+  }
+  async function deletePromo(code) {
+    if (!confirm('Удалить промокод ' + code + '?')) return;
+    try {
+      const j = await api('/api/admin/promos/delete', { method: 'POST', body: JSON.stringify({ code }) });
+      state.promos = j.promos || {};
+      renderPromos();
+      if (state.editingPromo === code) resetPromoForm();
+      toast('Промокод удалён');
+    } catch (e) { toast(e.message, true); }
+  }
   function openUser(id) {
     const row = state.users.find((u) => u.id === id);
     if (!row) return;
@@ -429,6 +550,7 @@ tbody tr:hover{background:rgba(255,255,255,.018)}
     state.stats = j.stats || {};
     state.plans = j.plans || {};
     state.ads = j.ads || {};
+    if (j.promos) state.promos = j.promos;
     renderOverview();
     renderUsers();
     if (state.view === 'ads') renderAds();
@@ -572,6 +694,15 @@ tbody tr:hover{background:rgba(255,255,255,.018)}
   $('btnUnban').addEventListener('click', unbanUser);
   $('btnRole').addEventListener('click', toggleRole);
   $('saveAds').addEventListener('click', saveAds);
+  $('savePromo').addEventListener('click', savePromo);
+  $('resetPromo').addEventListener('click', resetPromoForm);
+  document.querySelectorAll('[data-promodays]').forEach((b) => b.addEventListener('click', () => { $('promoDays').value = b.dataset.promodays; }));
+  $('promosBody').addEventListener('click', (e) => {
+    const editBtn = e.target.closest('[data-editpromo]');
+    if (editBtn) { editPromo(editBtn.getAttribute('data-editpromo')); return; }
+    const delBtn = e.target.closest('[data-delpromo]');
+    if (delBtn) deletePromo(delBtn.getAttribute('data-delpromo'));
+  });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('userModal').classList.contains('hidden')) closeUser(); });
   boot();
 })();

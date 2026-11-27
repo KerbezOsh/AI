@@ -932,8 +932,8 @@ function appendStreamingMessage(msg) {
       msg.search = query;
       searchNote.textContent = typeof found === 'number' && found >= 0
         ? (failed
-          ? '🌐 поиск: «' + query + '» — сервис недоступен, отвечаю по знаниям'
-          : '🌐 поиск: «' + query + '» — ' + (found ? 'найдено ' + found + ' источников' : 'ничего не найдено, отвечаю по знаниям'))
+          ? '🌐 поиск: «' + query + '» — сервис недоступен'
+          : '🌐 поиск: «' + query + '» — ' + (found ? 'найдено ' + found + ' источников' : 'ничего не найдено'))
         : '🌐 ищу в интернете: «' + query + '»…';
       searchNote.classList.remove('hidden');
       scrollIfNear();

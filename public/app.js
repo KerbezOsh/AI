@@ -21,7 +21,7 @@ const state = {
   pendingFile: null
 };
 const PLANS_FALLBACK = {
-  free: { id: 'free', label: 'Free', limit: 10, modes: ['flash'], price: 0 },
+  free: { id: 'free', label: 'Free', limit: 18, proTrial: 2, modes: ['flash', 'pro', 'reasoning'], price: 0 },
   pro: { id: 'pro', label: 'Pro', limit: 200, modes: ['flash', 'pro', 'reasoning'], price: 49 },
   ultra: { id: 'ultra', label: 'Ultra', limit: 1000, modes: ['flash', 'pro', 'reasoning'], price: 149 }
 };
@@ -151,11 +151,30 @@ function highlightCode(src, lang) {
   return out;
 }
 
+// Если модель не указала язык у блока кода — определяем сами, чтобы подсветка работала.
+function guessLang(code) {
+  const s = String(code || '');
+  if (!s.trim()) return '';
+  if (/^\s*<!doctype html|<html[\s>]|<div[\s>]|<script[\s>]|<style[\s>]/i.test(s)) return 'html';
+  if (/^\s*[\[{][\s\S]*[\]}]\s*$/.test(s) && /("[^"\n]+"\s*:)/.test(s)) return 'json';
+  if (/\b(select|insert into|update|delete from|create table)\b/i.test(s) && /\bfrom\b|\bwhere\b/i.test(s)) return 'sql';
+  if (/^\s*(def |class \w+[(:]|from \w+ import |import \w+\s*$|print\()/m.test(s)) return 'python';
+  if (/\bfn\s+\w+\s*\(|\blet mut\b|\bimpl\b|\buse std::|println!/.test(s)) return 'rust';
+  if (/\bfunc\s+(\([^)]*\)\s*)?\w+\s*\(|\bpackage\s+\w+/.test(s)) return 'go';
+  if (/\b(public|private|protected)\s+(static\s+)?(class|interface|void|[A-Z]\w+)\b/.test(s)) return 'java';
+  if (/\b(interface|type)\s+\w+\s*[={]|:\s*(string|number|boolean)\b/.test(s)) return 'ts';
+  if (/\b(function|const|let|var|=>|console\.log)\b/.test(s)) return 'js';
+  if (/^\s*#include|\bint\s+main\s*\(/m.test(s)) return 'c';
+  if (/^\s*(FROM|RUN|COPY|ENTRYPOINT)\s/m.test(s)) return 'yaml';
+  return '';
+}
+
 function codeBlockHtml(code, lang) {
-  const rawLang = String(lang || '').replace(/[^A-Za-z0-9+#-]/g, '').slice(0, 20);
-  return '<div class="code-block"><div class="code-head"><span class="code-lang">' + esc(codeLangLabel(lang)) +
+  const detected = String(lang || '').trim() || guessLang(code);
+  const safeLang = String(detected || '').replace(/[^A-Za-z0-9+#-]/g, '').slice(0, 20);
+  return '<div class="code-block"><div class="code-head"><span class="code-lang">' + esc(codeLangLabel(detected || 'Код')) +
     '</span><button class="code-copy" type="button" aria-label="Скопировать код">Копировать</button></div><pre><code' +
-    (rawLang ? ' class="language-' + esc(rawLang) + '"' : '') + '>' + highlightCode(code, lang) + '</code></pre></div>';
+    (safeLang ? ' class="language-' + esc(safeLang) + '"' : '') + '>' + highlightCode(code, detected) + '</code></pre></div>';
 }
 
 function bindCodeCopy(root) {
@@ -189,84 +208,287 @@ function isDigits(s) {
   return true;
 }
 
-function inline(text) {
-  let src = String(text).split('\\(').join('').split('\\)').join('').split('\\[').join('').split('\\]').join('').split('$').join('');
-  src = src
-    .replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '($1)/($2)')
-    .replace(/\\sqrt\{([^{}]+)\}/g, '√($1)')
-    .replace(/\\(text|mathrm)\{([^{}]*)\}/g, '$2')
-    .replace(/\\cdot/g, '·')
-    .replace(/\\times/g, '×')
-    .replace(/\\approx/g, '≈')
-    .replace(/\\le/g, '≤')
-    .replace(/\\ge/g, '≥')
-    .replace(/\^\{?2\}?/g, '²')
-    .replace(/\^\{?3\}?/g, '³')
-    .replace(/_0/g, '₀').replace(/_1/g, '₁').replace(/_2/g, '₂').replace(/_3/g, '₃').replace(/_4/g, '₄')
-    .replace(/_5/g, '₅').replace(/_6/g, '₆').replace(/_7/g, '₇').replace(/_8/g, '₈').replace(/_9/g, '₉')
-    .replace(/\\\s/g, ' ')
-    .replace(/\\left|\\right/g, '')
-    .replace(/\\[a-zA-Z]+/g, '')
-    .replace(/[{}]/g, '');
+// ── Формулы ──────────────────────────────────────────────────────────
+// Маленький TeX-рендерер: \frac, \sqrt, степени/индексы, греческие буквы.
+// Экранирование полное, поэтому HTML из ответа модели сюда не просочится.
+const TEX_SYMBOLS = {
+  alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ε', zeta: 'ζ', eta: 'η', theta: 'θ',
+  lambda: 'λ', mu: 'μ', nu: 'ν', xi: 'ξ', pi: 'π', rho: 'ρ', sigma: 'σ', tau: 'τ', phi: 'φ', varphi: 'φ', chi: 'χ', psi: 'ψ', omega: 'ω',
+  Gamma: 'Γ', Delta: 'Δ', Theta: 'Θ', Lambda: 'Λ', Xi: 'Ξ', Pi: 'Π', Sigma: 'Σ', Phi: 'Φ', Psi: 'Ψ', Omega: 'Ω',
+  times: '×', cdot: '·', div: '÷', pm: '±', mp: '∓', le: '≤', leq: '≤', ge: '≥', geq: '≥', ne: '≠', neq: '≠', approx: '≈', equiv: '≡',
+  propto: '∝', infty: '∞', sum: '∑', prod: '∏', int: '∫', partial: '∂', nabla: '∇', to: '→', rightarrow: '→', leftarrow: '←',
+  leftrightarrow: '↔', Rightarrow: '⇒', Leftarrow: '⇐', implies: '⇒', forall: '∀', exists: '∃', in: '∈', notin: '∉',
+  subset: '⊂', supset: '⊃', cup: '∪', cap: '∩', angle: '∠', degree: '°', ldots: '…', dots: '…', cdots: '⋯',
+  sin: 'sin', cos: 'cos', tan: 'tan', log: 'log', ln: 'ln', lim: 'lim', max: 'max', min: 'min'
+};
+
+function texGroup(s, i) {
+  if (s[i] !== '{') return { arg: s[i] || '', next: i + 1 };
+  let depth = 0;
+  const start = i;
+  for (; i < s.length; i++) {
+    if (s[i] === '{') depth++;
+    else if (s[i] === '}') { depth--; if (depth === 0) return { arg: s.slice(start + 1, i), next: i + 1 }; }
+  }
+  return { arg: s.slice(start + 1), next: s.length };
+}
+
+function renderTex(src) {
+  const s = String(src || '').trim();
   let out = '';
-  const bold = src.split('**');
-  bold.forEach((part, i) => { out += i % 2 === 1 ? '<strong>' + part + '</strong>' : part; });
-  out = out.replace(/(^|[\s(])\*([^*\s][^*<>]*?)\*(?=[\s).,;:!?]|$)/g, '$1<em>$2</em>');
-  const code = out.split('`');
-  if (code.length > 1) {
-    out = code.map((c, i) => (i % 2 === 1 ? '<code>' + c + '</code>' : c)).join('');
+  let i = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === '\\') {
+      const m = /^\\([A-Za-z]+|.)/.exec(s.slice(i));
+      if (!m) { i++; continue; }
+      const name = m[1];
+      i += m[0].length;
+      if (name === 'frac' || name === 'dfrac' || name === 'tfrac') {
+        while (s[i] === ' ') i++;
+        const a = texGroup(s, i); i = a.next;
+        while (s[i] === ' ') i++;
+        const b = texGroup(s, i); i = b.next;
+        out += '<span class="frac"><span class="frac-num">' + renderTex(a.arg) + '</span><span class="frac-den">' + renderTex(b.arg) + '</span></span>';
+        continue;
+      }
+      if (name === 'sqrt') {
+        let index = '';
+        if (s[i] === '[') {
+          const close = s.indexOf(']', i);
+          if (close > 0) { index = s.slice(i + 1, close); i = close + 1; }
+        }
+        while (s[i] === ' ') i++;
+        const a = texGroup(s, i); i = a.next;
+        out += (index ? '<sup class="sqrt-index">' + renderTex(index) + '</sup>' : '') +
+          '<span class="sqrt">√<span class="sqrt-body">' + renderTex(a.arg) + '</span></span>';
+        continue;
+      }
+      if (name === 'text' || name === 'mathrm' || name === 'operatorname' || name === 'mathbf') {
+        while (s[i] === ' ') i++;
+        const a = texGroup(s, i); i = a.next;
+        out += '<span class="tex-text">' + esc(a.arg) + '</span>';
+        continue;
+      }
+      if (name === 'left' || name === 'right' || name === 'big' || name === 'Big' || name === 'bigl' || name === 'bigr' || name === 'displaystyle') continue;
+      if (name === 'quad' || name === 'qquad' || name === ',' || name === ';' || name === ':' || name === '!' || name === ' ') { out += ' '; continue; }
+      if (TEX_SYMBOLS[name]) { out += TEX_SYMBOLS[name]; continue; }
+      out += esc(name);
+      continue;
+    }
+    if (ch === '^' || ch === '_') {
+      i++;
+      while (s[i] === ' ') i++;
+      let arg;
+      if (s[i] === '{') { const a = texGroup(s, i); arg = a.arg; i = a.next; }
+      else { arg = s[i] || ''; i++; }
+      out += ch === '^' ? '<sup>' + renderTex(arg) + '</sup>' : '<sub>' + renderTex(arg) + '</sub>';
+      continue;
+    }
+    if (ch === '{') { const a = texGroup(s, i); out += renderTex(a.arg); i = a.next; continue; }
+    if (ch === '}') { i++; continue; }
+    out += esc(ch);
+    i++;
   }
   return out;
 }
 
+// Делим строку на обычный текст и формулы: $...$ и \( ... \).
+// «$5» без TeX-признаков остаётся ценой, а не формулой.
+function splitMath(text) {
+  const s = String(text || '');
+  const parts = [];
+  let buf = '';
+  let i = 0;
+  while (i < s.length) {
+    if (s[i] === '\\' && s[i + 1] === '(') {
+      const close = s.indexOf('\\)', i + 2);
+      if (close > i + 2) {
+        if (buf) { parts.push({ text: buf }); buf = ''; }
+        parts.push({ tex: s.slice(i + 2, close) });
+        i = close + 2;
+        continue;
+      }
+    }
+    if (s[i] === '$' && s[i + 1] === '$') {
+      const close = s.indexOf('$$', i + 2);
+      if (close > i + 2) {
+        const body = s.slice(i + 2, close);
+        if (body.trim()) {
+          if (buf) { parts.push({ text: buf }); buf = ''; }
+          parts.push({ tex: body, display: true });
+          i = close + 2;
+          continue;
+        }
+      }
+    }
+    if (s[i] === '$' && s[i + 1] !== '$') {
+      const close = s.indexOf('$', i + 1);
+      if (close > i + 1) {
+        const body = s.slice(i + 1, close);
+        const texish = body.indexOf('\\') >= 0 || body.indexOf('^') >= 0 || body.indexOf('_') >= 0 ||
+          body.indexOf('{') >= 0 || body.indexOf('=') >= 0;
+        if (body.length <= 240 && body.indexOf('\n') < 0 && texish) {
+          if (buf) { parts.push({ text: buf }); buf = ''; }
+          parts.push({ tex: body });
+          i = close + 1;
+          continue;
+        }
+      }
+    }
+    buf += s[i];
+    i++;
+  }
+  if (buf) parts.push({ text: buf });
+  return parts;
+}
+
+// Дочитываем LaTeX, который модель забыла обернуть в формулу: без «сырых» команд.
+function cleanTexText(src) {
+  let t = String(src || '');
+  for (let guard = 0; guard < 50; guard++) {
+    const at = t.indexOf('\\frac{');
+    if (at < 0) break;
+    const a1 = t.indexOf('}', at + 6);
+    const b0 = a1 >= 0 ? t.indexOf('{', a1) : -1;
+    const b1 = b0 >= 0 ? t.indexOf('}', b0) : -1;
+    if (a1 < 0 || b0 !== a1 + 1 || b1 < 0) break;
+    t = t.slice(0, at) + '(' + t.slice(at + 6, a1) + ')/(' + t.slice(b0 + 1, b1) + ')' + t.slice(b1 + 1);
+  }
+  const map = [['\\sqrt{', '√('], ['\\cdot', '·'], ['\\times', '×'], ['\\approx', '≈'], ['\\le', '≤'], ['\\ge', '≥'], ['\\infty', '∞']];
+  for (const pair of map) t = t.split(pair[0]).join(pair[1]);
+  let out = '';
+  for (let i = 0; i < t.length; i++) {
+    if (t[i] === '\\' && /[A-Za-z]/.test(t[i + 1] || '')) {
+      i++;
+      while (i < t.length && /[A-Za-z]/.test(t[i])) i++;
+      i--;
+      continue;
+    }
+    if (t[i] === '{' || t[i] === '}') continue;
+    out += t[i];
+  }
+  return out;
+}
+
+function applyEmphasis(src) {
+  let out = '';
+  const bold = String(src || '').split('**');
+  for (let i = 0; i < bold.length; i++) out += i % 2 === 1 ? '<strong>' + bold[i] + '</strong>' : bold[i];
+  out = out.replace(/(^|[\s(])\*([^*\s][^*<>]*?)\*(?=[\s).,;:!?]|$)/g, '$1<em>$2</em>');
+  const tick = String.fromCharCode(96);
+  const code = out.split(tick);
+  if (code.length > 1) out = code.map((c, i) => (i % 2 === 1 ? '<code>' + c + '</code>' : c)).join('');
+  out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  out = out.replace(/(^|[\s(])(https?:\/\/[^\s<]+[^\s<.,;:!?)\]])/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
+  return out;
+}
+
+function inline(text) {
+  let out = '';
+  for (const part of splitMath(text)) {
+    if (part.tex !== undefined) {
+      out += '<span class="' + (part.display ? 'math-block' : 'math-inline') + '">' + renderTex(part.tex) + '</span>';
+    } else {
+      out += applyEmphasis(cleanTexText(part.text));
+    }
+  }
+  return out;
+}
+function mathBlock(src) {
+  return '<div class="math-block">' + renderTex(src) + '</div>';
+}
+
 function md(src) {
-  const lines = String(src || '').split('\n');
+  const lines = String(src || '').replace(/\r\n?/g, '\n').split('\n');
+  const FENCE = String.fromCharCode(96, 96, 96);
   const out = [];
   let inCode = false;
   let code = [];
   let codeLang = '';
   let para = [];
-  let list = null;
-
-  const closeList = () => {
-    if (list) { out.push('</' + list + '>'); list = null; }
-  };
-  const closePara = () => {
-    if (para.length) { out.push('<p>' + para.map(inline).join('<br>') + '</p>'); para = []; }
-  };
-  const openList = (t) => {
-    if (list !== t) { closeList(); out.push('<' + t + '>'); list = t; }
-  };
-
-  // Таблицы: набор строк вида |a|b|, шапка отделена |---|---|.
+  let lists = [];
   let table = null;
-  const isSepRow = (cells) => cells.length > 0 && cells.every((c) => /^:?-{2,}:?$/.test(c.replace(/\s/g, '')));
+
+  const closePara = () => {
+    if (!para.length) return;
+    out.push('<p>' + inline(para.join('<br>')) + '</p>');
+    para = [];
+  };
+  const isSep = (cells) => cells.length > 1 && cells.every((c) => /^:?-{2,}:?$/.test(c.replace(/\s/g, '')));
+  const closeList = () => {
+    while (lists.length) {
+      const it = lists.pop();
+      if (it.open) out.push('</li>');
+      out.push('</' + it.type + '>');
+    }
+  };
   const flushTable = () => {
     if (!table) return;
-    const rows = table;
+    const rows = table.filter((r) => !isSep(r));
     table = null;
     if (!rows.length) return;
-    let head = null;
-    let body = rows;
-    if (rows.length > 1 && isSepRow(rows[1])) { head = rows[0]; body = rows.slice(2); }
-    let html = '<table>';
-    if (head) html += '<thead><tr>' + head.map((c) => '<th>' + inline(esc(c.trim())) + '</th>').join('') + '</tr></thead>';
-    html += '<tbody>';
-    for (const r of body) {
-      if (isSepRow(r)) continue;
-      html += '<tr>' + r.map((c) => '<td>' + inline(esc(c.trim())) + '</td>').join('') + '</tr>';
+    const head = rows.shift();
+    let html = '<div class="table-wrap"><table><thead><tr>';
+    for (const c of head) html += '<th>' + inline(esc(c.trim())) + '</th>';
+    html += '</tr></thead><tbody>';
+    for (const row of rows) {
+      html += '<tr>';
+      for (const c of row) html += '<td>' + inline(esc(c.trim())) + '</td>';
+      html += '</tr>';
     }
-    html += '</tbody></table>';
+    html += '</tbody></table></div>';
     out.push(html);
   };
+  const listItem = (raw) => {
+    const m = /^([ \t]*)([-*•]|\d+[.)])\s+(.*)$/.exec(raw);
+    if (!m) return false;
+    const indent = m[1].replace(/\t/g, '    ').length;
+    const type = m[2] === '-' || m[2] === '*' || m[2] === '•' ? 'ul' : 'ol';
+    let text = m[3];
+    let task = false;
+    if (type === 'ul') {
+      const box = /^\[([ xX])\]\s+/.exec(text);
+      if (box) {
+        task = true;
+        text = (box[1].toLowerCase() === 'x' ? '☑ ' : '☐ ') + text.slice(box[0].length);
+      }
+    }
+    while (lists.length && indent < lists[lists.length - 1].indent) {
+      const it = lists.pop();
+      if (it.open) out.push('</li>');
+      out.push('</' + it.type + '>');
+    }
+    if (!lists.length || indent > lists[lists.length - 1].indent) {
+      lists.push({ type, indent, open: false });
+      out.push('<' + type + '>');
+    } else {
+      const top = lists[lists.length - 1];
+      if (top.type !== type) {
+        if (top.open) { out.push('</li>'); top.open = false; }
+        out.push('</' + top.type + '>');
+        top.type = type;
+        out.push('<' + type + '>');
+      }
+      if (top.open) out.push('</li>');
+    }
+    out.push('<li' + (task ? ' class="task"' : '') + '>' + inline(esc(text)));
+    lists[lists.length - 1].open = true;
+    return true;
+  };
 
-  for (const raw of lines) {
-    if (table && !raw.trim().startsWith('|')) flushTable();
-    if (raw.trim().startsWith('```')) {
+  for (let n = 0; n < lines.length; n++) {
+    const raw = lines[n];
+    const trimmed = raw.trim();
+
+    if (table && !trimmed.startsWith('|')) flushTable();
+
+    if (trimmed.startsWith(FENCE)) {
       if (!inCode) {
         closePara(); closeList();
-        inCode = true; code = [];
-        codeLang = raw.trim().slice(3).trim().split(/\s+/)[0] || '';
+        inCode = true;
+        code = [];
+        codeLang = trimmed.slice(3).trim().split(/\s+/)[0] || '';
       } else {
         out.push(codeBlockHtml(code.join('\n'), codeLang));
         inCode = false;
@@ -275,38 +497,61 @@ function md(src) {
       continue;
     }
     if (inCode) { code.push(raw); continue; }
+    if (!trimmed) { closePara(); closeList(); continue; }
 
-    const line = raw.trim();
-    if (!line) { closePara(); closeList(); continue; }
+    if (trimmed.startsWith('$$')) {
+      closePara(); closeList(); flushTable();
+      let body = trimmed.slice(2);
+      if (body.endsWith('$$')) { out.push(mathBlock(body.slice(0, -2))); continue; }
+      while (n + 1 < lines.length) {
+        n++;
+        const l2 = lines[n].trim();
+        if (l2.endsWith('$$')) { body += '\n' + l2.slice(0, -2); break; }
+        body += '\n' + l2;
+      }
+      out.push(mathBlock(body));
+      continue;
+    }
 
-    if (line.startsWith('|')) {
+    if (trimmed.startsWith('|')) {
       closePara(); closeList();
       if (!table) table = [];
-      table.push(line.replace(/^\|/, '').replace(/\|$/, '').split('|'));
+      let row = trimmed;
+      if (row.startsWith('|')) row = row.slice(1);
+      if (row.endsWith('|')) row = row.slice(0, -1);
+      table.push(row.split('|'));
       continue;
     }
 
-    if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) { closePara(); closeList(); out.push('<hr>'); continue; }
-
-    if (line.startsWith('### ')) { closePara(); closeList(); out.push('<h3>' + inline(esc(line.slice(4))) + '</h3>'); continue; }
-    if (line.startsWith('## ')) { closePara(); closeList(); out.push('<h2>' + inline(esc(line.slice(3))) + '</h2>'); continue; }
-    if (line.startsWith('# ')) { closePara(); closeList(); out.push('<h1>' + inline(esc(line.slice(2))) + '</h1>'); continue; }
-
-    if (line.startsWith('- ') || line.startsWith('• ') || line.startsWith('* ')) {
-      closePara(); openList('ul');
-      out.push('<li>' + inline(esc(line.slice(2))) + '</li>');
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+      closePara(); closeList();
+      out.push('<hr>');
       continue;
     }
 
-    const dot = line.indexOf('. ');
-    if (dot > 0 && dot <= 3 && isDigits(line.slice(0, dot))) {
-      closePara(); openList('ol');
-      out.push('<li>' + inline(esc(line.slice(dot + 2))) + '</li>');
+    const h = /^(#{1,4})\s+(.*)$/.exec(trimmed);
+    if (h) {
+      closePara(); closeList();
+      const lvl = h[1].length;
+      out.push('<h' + lvl + '>' + inline(esc(h[2])) + '</h' + lvl + '>');
       continue;
     }
+
+    if (trimmed.startsWith('> ')) {
+      closePara(); closeList();
+      let q = trimmed.slice(2);
+      while (n + 1 < lines.length && lines[n + 1].trim().startsWith('> ')) {
+        n++;
+        q += '\n' + lines[n].trim().slice(2);
+      }
+      out.push('<blockquote>' + inline(esc(q)).replace(/\n/g, '<br>') + '</blockquote>');
+      continue;
+    }
+
+    if (listItem(raw)) { closePara(); continue; }
 
     closeList();
-    para.push(esc(line));
+    para.push(esc(trimmed));
   }
 
   if (inCode) out.push(codeBlockHtml(code.join('\n'), codeLang));
@@ -315,7 +560,6 @@ function md(src) {
   closeList();
   return out.join('');
 }
-
 // Режимы модели: в меню три понятных варианта, оба реально влияют на запрос.
 const MODES = {
   reasoning: { tier: 'pro', deep: true, label: 'Reasoning' },
@@ -324,11 +568,10 @@ const MODES = {
 };
 
 function currentMode() {
-  if (!state.isAdmin && ((state.plan && state.plan.id) || 'free') === 'free') return 'flash';
   const tier = (state.settings && state.settings.tier) || 'pro';
-  if (tier === 'easy') return 'flash';
+  if (state.deepMode) return 'reasoning';
   // medium — старый уровень из ранних версий; в новой модели это Pro.
-  return state.deepMode ? 'reasoning' : 'pro';
+  return tier === 'easy' || tier === 'flash' ? 'flash' : 'pro';
 }
 
 function modeLabel() {
@@ -347,10 +590,21 @@ async function applyMode(mode, silent) {
   const conf = MODES[mode];
   if (!conf || !state.settings) return;
   const planId = (state.plan && state.plan.id) || 'free';
-  if (!state.isAdmin && planId === 'free' && mode !== 'flash' && !silent) {
-    toast('Pro и Reasoning доступны на тарифах Pro и Ultra');
-    openVip();
-    return;
+  if (!state.isAdmin && planId === 'free' && mode !== 'flash') {
+    if (!state.user) {
+      toast('Войди в аккаунт, чтобы попробовать Pro');
+      $('authModal').classList.remove('hidden');
+      return;
+    }
+    const trial = Number(state.plan && state.plan.proTrial) || 2;
+    const used = Number(state.usage && state.usage.proUsed) || 0;
+    const left = Math.max(0, trial - used);
+    if (left <= 0) {
+      toast('Пробные Pro на сегодня закончились — подключи Pro или Ultra');
+      if (!silent) openVip();
+      return;
+    }
+    if (!silent) toast('Пробный Pro: ' + left + ' из ' + trial + ' запросов на сегодня');
   }
   state.settings.tier = conf.tier;
   state.deepMode = conf.deep;
@@ -417,17 +671,98 @@ function avatar(role) {
   return el('div', 'avatar ' + role, role === 'user' ? 'Я' : 'φ');
 }
 
+// Модель может вернуть рассуждения прямо в тексте — выносим их в отдельный спойлер.
+function splitThinking(content, reasoning) {
+  let body = String(content || '');
+  let think = String(reasoning || '');
+  const open = /<thinking[^>]*>/i.exec(body);
+  if (open) {
+    const rest = body.slice(open.index + open[0].length);
+    const close = /<\/thinking\s*>/i.exec(rest);
+    const inner = close ? rest.slice(0, close.index) : rest;
+    if (inner.trim()) think = think ? think.trim() + '\n\n' + inner.trim() : inner.trim();
+    body = (body.slice(0, open.index) + (close ? rest.slice(close.index + close[0].length) : '')).trim();
+  }
+  return { content: body, reasoning: think.trim() };
+}
+
+// Не показываем пользователю недописанный тег <thinking> посреди потока.
+function partialTagTail(text, re) {
+  const limit = Math.min(text.length, 40);
+  for (let n = limit; n > 0; n--) {
+    if (re.test(text.slice(-n))) return n;
+  }
+  return 0;
+}
+
+function createThinkFilter() {
+  let mode = 'undecided';
+  let buf = '';
+  const OPEN = /^\s*<thinking[^>]*>/i;
+  const OPEN_PREFIX = /^<\s*(?:t|th|thi|thin|think|thinking)?\s*>?$/i;
+  const CLOSE = /<\/thinking\s*>/i;
+  const CLOSE_PREFIX = /^<\/\s*(?:t|th|thi|thin|think|thinking)?\s*>?$/i;
+  return {
+    push(chunk) {
+      const out = { reasoning: '', content: '' };
+      buf += String(chunk || '');
+      if (mode === 'undecided') {
+        const m = OPEN.exec(buf);
+        if (!m) {
+          if (OPEN_PREFIX.test(buf.trim())) return out;
+          out.content = buf;
+          buf = '';
+          mode = 'answer';
+          return out;
+        }
+        buf = buf.slice(m[0].length);
+        mode = 'thinking';
+      }
+      if (mode === 'thinking') {
+        const m = CLOSE.exec(buf);
+        if (!m) {
+          const tail = partialTagTail(buf, CLOSE_PREFIX);
+          out.reasoning = tail ? buf.slice(0, -tail) : buf;
+          buf = tail ? buf.slice(-tail) : '';
+          return out;
+        }
+        out.reasoning = buf.slice(0, m.index);
+        buf = buf.slice(m.index + m[0].length);
+        mode = 'answer';
+      }
+      out.content = buf;
+      buf = '';
+      return out;
+    },
+    finish() {
+      const out = { reasoning: '', content: '' };
+      if (mode === 'thinking') out.reasoning = buf;
+      else out.content = buf;
+      buf = '';
+      return out;
+    }
+  };
+}
+
 function messageNode(msg, question) {
   const row = el('div', 'msg ' + (msg.role === 'user' ? 'user' : 'assistant'));
   row.appendChild(avatar(msg.role));
   const bubble = el('div', 'bubble');
 
-  if (msg.role === 'assistant' && msg.reasoning) {
+  const parsed = msg.role === 'assistant' ? splitThinking(msg.content, msg.reasoning) : { content: msg.content, reasoning: '' };
+  const body = msg.role === 'assistant' && !String(parsed.content || '').trim()
+    ? (parsed.reasoning ? '_Ответа нет — смотри «Ход мыслей»._' : '_Модель не вернула текст ответа. Нажми «Ещё раз» или выбери другой режим._')
+    : parsed.content;
+
+  if (msg.role === 'assistant' && parsed.reasoning) {
     const det = document.createElement('details');
     det.className = 'think';
     const sum = document.createElement('summary');
-    sum.textContent = msg.deep ? 'Глубокие размышления' : 'Размышления';
-    det.append(sum, el('div', 'think-body', msg.reasoning));
+    sum.textContent = 'Ход мыслей';
+    const thinkBody = el('div', 'think-body');
+    thinkBody.innerHTML = md(parsed.reasoning);
+    bindCodeCopy(thinkBody);
+    det.append(sum, thinkBody);
     bubble.appendChild(det);
   }
 
@@ -436,20 +771,15 @@ function messageNode(msg, question) {
   if (msg.search) bubble.appendChild(el('div', 'msg-attach', '🌐 поиск: ' + msg.search));
 
   const content = el('div', 'content');
-  // Пустой ответ модели (например, весь бюджет ушёл в размышления) не должен
-  // оставлять пустой бабл без объяснения.
-  const body = msg.role === 'assistant' && !String(msg.content || '').trim()
-    ? '_Модель не вернула текст ответа. Нажми «Ещё раз» или выбери другой режим._'
-    : msg.content;
   content.innerHTML = md(body);
   bindCodeCopy(content);
   bubble.appendChild(content);
 
-  if (msg.role === 'assistant' && msg.content) {
-    bubble.appendChild(el('div', 'model-tag', tierLabel(msg.tier || 'pro')));
+  if (msg.role === 'assistant' && parsed.content) {
+    bubble.appendChild(el('div', 'model-tag', tierLabel(msg.tier || 'pro') + (msg.fallback ? ' · резерв' : '')));
   }
 
-  if (msg.role === 'assistant' && msg.content) addActions(bubble, msg, question);
+  if (msg.role === 'assistant' && parsed.content) addActions(bubble, msg, question);
 
   row.appendChild(bubble);
   return row;
@@ -537,9 +867,11 @@ function appendStreamingMessage(msg) {
   const det = document.createElement('details');
   det.className = 'think hidden';
   const sum = document.createElement('summary');
-  sum.textContent = 'Размышления';
-  const thinkBody = el('div', 'think-body');
+  sum.textContent = 'Ход мыслей';
+  const thinkBody = el('div', 'think-body streaming');
   det.append(sum, thinkBody);
+  let userToggled = false;
+  sum.addEventListener('click', () => { userToggled = true; });
 
   const content = el('div', 'content streaming');
   const typing = el('div', 'typing');
@@ -560,44 +892,75 @@ function appendStreamingMessage(msg) {
   box.scrollTop = box.scrollHeight;
 
   let failed = false;
+  let gotContent = false;
+  let raf = 0;
+
+  const paint = () => {
+    raf = 0;
+    content.textContent = msg.content;
+    scrollIfNear();
+  };
 
   return {
     msg,
     setReasoning(text) {
-      if (det.classList.contains('hidden')) det.classList.remove('hidden');
+      if (!text) return;
+      msg.reasoning = text;
+      if (typing.parentNode) typing.remove();
+      det.classList.remove('hidden');
+      if (!userToggled) det.open = true;
       thinkBody.textContent = text;
       scrollIfNear();
     },
-    setModel(tier, model) {
+    setModel(tier, model, fallback) {
       msg.tier = tier;
       msg.model = model;
-      tag.textContent = tierLabel(tier || 'pro');
+      msg.fallback = Boolean(fallback);
+      tag.textContent = tierLabel(tier || 'pro') + (fallback ? ' · резерв' : '');
       tag.classList.remove('hidden');
     },
-    setSearch(query) {
+    setSearch(query, found, failed) {
       msg.search = query;
-      searchNote.textContent = '🌐 ищу в интернете: ' + query;
+      searchNote.textContent = typeof found === 'number' && found >= 0
+        ? (failed
+          ? '🌐 поиск: «' + query + '» — сервис недоступен, отвечаю по знаниям'
+          : '🌐 поиск: «' + query + '» — ' + (found ? 'найдено ' + found + ' источников' : 'ничего не найдено, отвечаю по знаниям'))
+        : '🌐 ищу в интернете: «' + query + '»…';
       searchNote.classList.remove('hidden');
       scrollIfNear();
     },
     setContent(text) {
-      content.classList.add('streaming');
-      content.textContent = text;
-      scrollIfNear();
+      msg.content = text;
+      gotContent = Boolean(String(text).trim());
+      // Как только пошёл ответ, спойлер размышлений сворачивается (если его не открыли вручную).
+      if (gotContent && !userToggled) det.open = false;
+      if (!raf) raf = requestAnimationFrame(paint);
     },
     fail(text) {
       failed = true;
       content.classList.remove('streaming');
-      content.innerHTML = '<p class=\'error-text\'>' + esc(text) + '</p>';
+      content.innerHTML = '<p class="error-text">' + esc(text) + '</p>';
       det.open = false;
       row.classList.add('error');
     },
     finish() {
       if (failed) { scrollIfNear(); return; }
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      const parsed = splitThinking(msg.content, msg.reasoning);
+      msg.content = parsed.content;
+      msg.reasoning = parsed.reasoning;
       content.classList.remove('streaming');
-      content.innerHTML = md(msg.content);
+      content.innerHTML = md(msg.content || (msg.reasoning ? '_Ответа нет — смотри «Ход мыслей»._' : '_Модель не вернула текст ответа._'));
       bindCodeCopy(content);
-      det.open = false;
+      if (msg.reasoning) {
+        det.classList.remove('hidden');
+        thinkBody.classList.remove('streaming');
+        thinkBody.innerHTML = md(msg.reasoning);
+        bindCodeCopy(thinkBody);
+        det.open = false;
+      }
+      tag.textContent = tierLabel(msg.tier || 'pro') + (msg.fallback ? ' · резерв' : '');
+      tag.classList.remove('hidden');
       addActions(bubble, msg, lastUserText());
       scrollIfNear();
     }
@@ -652,6 +1015,7 @@ async function streamReply(view, text, opts) {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
+    const filter = createThinkFilter();
 
     while (true) {
       const { done, value } = await reader.read();
@@ -666,8 +1030,16 @@ async function streamReply(view, text, opts) {
         if (!data || data === '[DONE]') continue;
         let j;
         try { j = JSON.parse(data); } catch (e) { continue; }
-        if (j.meta) { view.setModel(j.meta.tier, j.meta.model); continue; }
-        if (j.status && j.status.search) { view.setSearch && view.setSearch(j.status.search); continue; }
+        if (j.meta) {
+          view.setModel(j.meta.tier, j.meta.model, j.meta.fallback);
+          if (j.meta.search) msg.search = j.meta.search;
+          continue;
+        }
+        if (j.status && j.status.search) {
+          view.setSearch(j.status.search, typeof j.status.found === 'number' ? j.status.found : undefined, Boolean(j.status.failed));
+          continue;
+        }
+        if (j.error) throw new Error(j.error);
         const d = j.choices && j.choices[0] && j.choices[0].delta;
         if (!d) continue;
         if (d.reasoning_content) {
@@ -675,11 +1047,15 @@ async function streamReply(view, text, opts) {
           view.setReasoning(msg.reasoning);
         }
         if (d.content) {
-          msg.content += d.content;
-          view.setContent(msg.content);
+          const part = filter.push(d.content);
+          if (part.reasoning) { msg.reasoning += part.reasoning; view.setReasoning(msg.reasoning); }
+          if (part.content) { msg.content += part.content; view.setContent(msg.content); }
         }
       }
     }
+    const tail = filter.finish();
+    if (tail.reasoning) { msg.reasoning += tail.reasoning; view.setReasoning(msg.reasoning); }
+    if (tail.content) { msg.content += tail.content; view.setContent(msg.content); }
   } catch (e) {
     if (e.name === 'AbortError') {
       msg.content += (msg.content ? '\n\n' : '') + '_Остановлено._';
@@ -862,20 +1238,26 @@ function applyAdVisibility() {
 function updatePlanUI() {
   const plan = (state.plan && state.plan.id) || 'free';
   const label = (state.plan && state.plan.label) || (PLANS_FALLBACK[plan] && PLANS_FALLBACK[plan].label) || 'Free';
-  const limit = (state.plan && state.plan.limit) || (PLANS_FALLBACK[plan] && PLANS_FALLBACK[plan].limit) || 10;
+  const limit = (state.plan && state.plan.limit) || (PLANS_FALLBACK[plan] && PLANS_FALLBACK[plan].limit) || 18;
   const used = state.usage ? Number(state.usage.used) || 0 : 0;
+  const proTrial = Number(state.plan && state.plan.proTrial) || 2;
+  const proUsed = Number(state.usage && state.usage.proUsed) || 0;
+  const trialLeft = Math.max(0, proTrial - proUsed);
+
+  // На Free Pro доступен только как 2 пробных запроса; когда они кончились — Flash.
+  if (!state.isAdmin && plan === 'free' && trialLeft <= 0 && currentMode() !== 'flash') {
+    state.deepMode = false;
+    state.settings.tier = 'easy';
+    ui.deep = false;
+    saveUi();
+  }
+
   const meter = $('planMeter');
   if (meter) {
     meter.textContent = label + ' · ' + used + ' / ' + limit;
     meter.className = 'plan-meter plan-' + plan + (used >= limit ? ' limit' : '');
-    meter.title = 'Тариф ' + label + ': ' + used + ' из ' + limit + ' запросов сегодня';
-  }
-  if (!state.user || !state.isAdmin) {
-    // Free не должен оставлять выбранным Pro после выхода/истечения подписки.
-    if (plan === 'free' && (currentMode() !== 'flash' || state.deepMode)) {
-      state.deepMode = false;
-      applyMode('flash', true);
-    }
+    meter.title = 'Тариф ' + label + ': ' + used + ' из ' + limit + ' запросов сегодня' +
+      (plan === 'free' ? ' · Pro пробно: ' + trialLeft + ' из ' + proTrial : '');
   }
   const avatar = $('railAvatar');
   if (avatar) avatar.className = 'rail-avatar plan-' + plan;
@@ -895,12 +1277,10 @@ async function refreshAccount() {
     state.banned = j.banned || null;
     if (state.banned) showBan(state.banned);
     else hideBan();
-    const paid = (state.plan && state.plan.id) !== 'free' || state.isAdmin;
-    if (paid && ui.deep && !state.deepMode) {
+    if (ui.deep && !state.deepMode) {
       state.deepMode = true;
       setToggle('btnDeep', 'deepMode', 'Глубокое размышление включено');
     }
-    if (!paid) state.deepMode = false;
     updatePlanUI();
     applyAdVisibility();
     renderTierSelect();
@@ -910,8 +1290,8 @@ async function refreshAccount() {
 }
 
 async function initAuth() {
-  state.user = null;
-  state.plan = null;
+  // Не обнуляем state до ответа сервера: init() стартует параллельно и иначе
+  // принимает залогиненного пользователя за гостя и сбрасывает Pro-режим.
   await refreshAccount();
 }
 
@@ -937,6 +1317,8 @@ function renderAuth() {
   const planLabel = (state.plan && state.plan.label) || PLANS_FALLBACK[plan].label;
   const limit = (state.plan && state.plan.limit) || PLANS_FALLBACK[plan].limit;
   const used = state.usage ? Number(state.usage.used) || 0 : 0;
+  const proTrial = Number(state.plan && state.plan.proTrial) || 2;
+  const proUsed = Number(state.usage && state.usage.proUsed) || 0;
   const card = el('div', 'profile-card');
   const head = el('div', 'profile-head');
   const portrait = el('div', 'profile-avatar plan-' + plan, String(state.user.name || state.user.email).charAt(0).toUpperCase());
@@ -952,7 +1334,11 @@ function renderAuth() {
   track.appendChild(bar);
   meter.append(track, el('small', null, used + ' / ' + limit + ' запросов сегодня'));
   card.appendChild(meter);
-  if (plan !== 'free') card.appendChild(el('small', 'profile-until', 'Подписка ' + formatPlanUntil(state.user.planExpiresAt)));
+  if (plan !== 'free') {
+    card.appendChild(el('small', 'profile-until', 'Подписка ' + formatPlanUntil(state.user.planExpiresAt)));
+  } else {
+    card.appendChild(el('small', 'profile-until', 'Пробный Pro: ' + Math.max(0, proTrial - proUsed) + ' из ' + proTrial + ' на сегодня'));
+  }
   const actions = el('div', 'profile-actions');
   const planBtn = el('button', 'profile-btn primary-soft', 'Сменить план');
   planBtn.onclick = openVip;
@@ -1016,12 +1402,16 @@ function renderPlanModal() {
   const active = currentPlanData();
   const activeId = active.id || 'free';
   const used = state.usage ? Number(state.usage.used) || 0 : 0;
-  const limit = active.limit || 10;
+  const limit = active.limit || 18;
+  const proTrial = Number(active.proTrial) || 2;
+  const proUsed = Number(state.usage && state.usage.proUsed) || 0;
   $('planCurrent').textContent = active.label || 'Free';
   $('planCurrentMeta').textContent = activeId === 'free'
-    ? limit + ' запросов в день · только Flash'
+    ? limit + ' запросов в день · Flash + ' + proTrial + ' пробных Pro'
     : (limit + ' запросов в день · ' + formatPlanUntil(state.user && state.user.planExpiresAt));
-  $('planUsage').textContent = 'Сегодня использовано ' + used + ' из ' + limit;
+  $('planUsage').textContent = activeId === 'free'
+    ? 'Сегодня использовано ' + used + ' из ' + limit + ' · Pro ' + Math.min(proUsed, proTrial) + ' из ' + proTrial
+    : 'Сегодня использовано ' + used + ' из ' + limit;
 
   const grid = $('planGrid');
   grid.innerHTML = '';
@@ -1043,7 +1433,7 @@ function renderPlanModal() {
     card.appendChild(price);
     const list = el('ul', 'plan-features');
     if (id === 'free') {
-      list.append(el('li', null, '10 запросов в день'), el('li', null, 'Flash — быстрые ответы'), el('li', null, 'Без Pro и Reasoning'));
+      list.append(el('li', null, p.limit + ' запросов в день'), el('li', null, 'Flash — быстрые ответы'), el('li', null, (p.proTrial || 2) + ' пробных Pro и Reasoning в день'), el('li', null, 'Веб-поиск, фото и файлы'));
     } else {
       list.append(el('li', null, p.limit + ' запросов в день'), el('li', null, 'Flash, Pro и Reasoning'), el('li', null, 'Без рекламы'));
     }
@@ -1314,7 +1704,9 @@ async function openChat(id) {
   const j = await r.json();
   state.currentId = id;
   state.messages = j.chat.messages || [];
-  if (j.chat.tier) state.settings.tier = j.chat.tier;
+  // Режим выбирает пользователь, а не история: переключение чата не должно
+  // незаметно менять Flash/Pro. Ограничения тарифа проверяет updatePlanUI().
+  updatePlanUI();
   renderTierSelect();
   renderMessages();
   renderChatList();
@@ -1411,12 +1803,23 @@ function renderChatList() {
 
 function renderTierSelect() {
   const mode = currentMode();
-  const free = ((state.plan && state.plan.id) || 'free') === 'free' && !state.isAdmin;
+  const plan = (state.plan && state.plan.id) || 'free';
+  const free = plan === 'free' && !state.isAdmin;
+  const proTrial = Number(state.plan && state.plan.proTrial) || 2;
+  const proUsed = Number(state.usage && state.usage.proUsed) || 0;
+  const trialLeft = Math.max(0, proTrial - proUsed);
   document.querySelectorAll('#tierSelect button').forEach((b) => {
-    const locked = free && b.dataset.mode !== 'flash';
+    const isPro = b.dataset.mode !== 'flash';
+    const locked = free && isPro && (!state.user || trialLeft <= 0);
     b.classList.toggle('on', b.dataset.mode === mode);
     b.classList.toggle('locked', locked);
     b.setAttribute('aria-disabled', locked ? 'true' : 'false');
+    const hint = b.querySelector('small');
+    if (hint) {
+      if (b.dataset.mode === 'flash') hint.textContent = 'быстро';
+      else if (free) hint.textContent = !state.user ? 'нужен вход' : (trialLeft > 0 ? 'пробно · ' + trialLeft + ' запр.' : 'нужен Pro');
+      else hint.textContent = b.dataset.mode === 'pro' ? 'максимум' : 'думает дольше';
+    }
   });
   const label = $('tierLabel');
   if (label) label.textContent = modeLabel();
@@ -1619,7 +2022,11 @@ async function init() {
     state.isAdmin = Boolean(st.isAdmin || state.isAdmin);
     state.banned = st.banned || state.banned;
     if (state.banned) showBan(state.banned);
-    if (!state.isAdmin && ((state.plan && state.plan.id) || 'free') === 'free') {
+    const planId = (state.plan && state.plan.id) || 'free';
+    const trial = Number(state.plan && state.plan.proTrial) || 0;
+    const proUsed = Number(state.usage && state.usage.proUsed) || 0;
+    const canPro = state.isAdmin || (Boolean(state.user) && (planId !== 'free' || trial - proUsed > 0));
+    if (!canPro) {
       state.deepMode = false;
       applyMode('flash', true);
     } else if (ui.deep) {

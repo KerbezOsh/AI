@@ -10,9 +10,20 @@ const state = {
   settings: null,
   hasKey: false,
   hint: null,
-  adToken: null,
   streaming: false,
-  controller: null
+  controller: null,
+  user: null,
+  plan: null,
+  usage: null,
+  banned: null,
+  isAdmin: false,
+  booted: false,
+  pendingFile: null
+};
+const PLANS_FALLBACK = {
+  free: { id: 'free', label: 'Free', limit: 10, modes: ['flash'], price: 0 },
+  pro: { id: 'pro', label: 'Pro', limit: 200, modes: ['flash', 'pro', 'reasoning'], price: 49 },
+  ultra: { id: 'ultra', label: 'Ultra', limit: 1000, modes: ['flash', 'pro', 'reasoning'], price: 149 }
 };
 
 // Настройки интерфейса живут на устройстве: тема, размер текста, поведение.
@@ -74,6 +85,101 @@ function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
+// Безопасная подсветка кода: HTML экранируется посимвольно, никакой innerHTML из ответа модели.
+const CODE_KEYWORDS = new Set(('const let var function return if else for while do switch case break continue new class extends super this try catch finally throw typeof instanceof in of async await import export from default true false null undefined NaN Infinity interface type enum public private protected static readonly implements package namespace void yield delete with as get set').split(' '));
+const PY_KEYWORDS = new Set(('def class return if elif else for while in not and or is None True False import from as try except finally raise with lambda yield async await pass break continue global nonlocal assert del print self').split(' '));
+const SQL_KEYWORDS = new Set(('select from where insert into values update set delete create table drop alter join left right inner outer on group by order having limit offset and or not null is as distinct count sum avg min max case when then else end union all exists like in primary key foreign references index view database default').split(' '));
+
+function codeLangLabel(lang) {
+  const map = { js: 'JavaScript', javascript: 'JavaScript', ts: 'TypeScript', typescript: 'TypeScript', py: 'Python', python: 'Python', html: 'HTML', css: 'CSS', json: 'JSON', sql: 'SQL', bash: 'Bash', sh: 'Shell', shell: 'Shell', yml: 'YAML', yaml: 'YAML', md: 'Markdown', markdown: 'Markdown', java: 'Java', c: 'C', cpp: 'C++', csharp: 'C#', go: 'Go', rust: 'Rust', php: 'PHP', ruby: 'Ruby', kotlin: 'Kotlin', swift: 'Swift', xml: 'XML' };
+  return map[String(lang || '').toLowerCase()] || (lang ? String(lang).slice(0, 20) : 'Код');
+}
+
+function highlightCode(src, lang) {
+  const l = String(lang || '').toLowerCase();
+  const kw = l === 'py' || l === 'python' ? PY_KEYWORDS : l === 'sql' ? SQL_KEYWORDS : CODE_KEYWORDS;
+  const lineComment = (l === 'py' || l === 'python' || l === 'bash' || l === 'sh' || l === 'shell' || l === 'yml' || l === 'yaml' || l === 'ruby') ? '#' : l === 'sql' ? '--' : '//';
+  let out = '';
+  let i = 0;
+  const text = String(src);
+  while (i < text.length) {
+    const ch = text[i];
+    const rest = text.slice(i);
+    if (rest.startsWith('/*')) {
+      const end = text.indexOf('*/', i + 2);
+      const stop = end < 0 ? text.length : end + 2;
+      out += '<span class="tok-com">' + esc(text.slice(i, stop)) + '</span>';
+      i = stop;
+      continue;
+    }
+    if (rest.startsWith(lineComment)) {
+      const end = text.indexOf('\n', i);
+      const stop = end < 0 ? text.length : end;
+      out += '<span class="tok-com">' + esc(text.slice(i, stop)) + '</span>';
+      i = stop;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      let j = i + 1;
+      while (j < text.length) {
+        if (text[j] === '\\') { j += 2; continue; }
+        if (text[j] === ch) { j++; break; }
+        j++;
+      }
+      out += '<span class="tok-str">' + esc(text.slice(i, j)) + '</span>';
+      i = j;
+      continue;
+    }
+    if (/[0-9]/.test(ch) && (i === 0 || !/[A-Za-z_$]/.test(text[i - 1]))) {
+      const m = /^(?:0x[0-9a-f]+|\d+(?:\.\d+)?(?:e[+-]?\d+)?)/i.exec(rest);
+      if (m) {
+        out += '<span class="tok-num">' + esc(m[0]) + '</span>';
+        i += m[0].length;
+        continue;
+      }
+    }
+    if (/[A-Za-z_$]/.test(ch)) {
+      const m = /^[A-Za-z_$][A-Za-z0-9_$]*/.exec(rest);
+      const word = m[0];
+      out += kw.has(word) ? '<span class="tok-kw">' + word + '</span>' : esc(word);
+      i += word.length;
+      continue;
+    }
+    out += esc(ch);
+    i++;
+  }
+  return out;
+}
+
+function codeBlockHtml(code, lang) {
+  const rawLang = String(lang || '').replace(/[^A-Za-z0-9+#-]/g, '').slice(0, 20);
+  return '<div class="code-block"><div class="code-head"><span class="code-lang">' + esc(codeLangLabel(lang)) +
+    '</span><button class="code-copy" type="button" aria-label="Скопировать код">Копировать</button></div><pre><code' +
+    (rawLang ? ' class="language-' + esc(rawLang) + '"' : '') + '>' + highlightCode(code, lang) + '</code></pre></div>';
+}
+
+function bindCodeCopy(root) {
+  if (!root) return;
+  root.querySelectorAll('.code-copy').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const block = btn.closest('.code-block');
+      const code = block && block.querySelector('code');
+      if (!code) return;
+      try {
+        await navigator.clipboard.writeText(code.textContent);
+        const old = btn.textContent;
+        btn.textContent = 'Скопировано';
+        btn.classList.add('done');
+        setTimeout(() => { btn.textContent = old; btn.classList.remove('done'); }, 1400);
+      } catch (err) {
+        toast('Не удалось скопировать код');
+      }
+    });
+  });
+}
+
 function isDigits(s) {
   if (!s) return false;
   for (let i = 0; i < s.length; i++) {
@@ -118,6 +224,7 @@ function md(src) {
   const out = [];
   let inCode = false;
   let code = [];
+  let codeLang = '';
   let para = [];
   let list = null;
 
@@ -159,9 +266,11 @@ function md(src) {
       if (!inCode) {
         closePara(); closeList();
         inCode = true; code = [];
+        codeLang = raw.trim().slice(3).trim().split(/\s+/)[0] || '';
       } else {
-        out.push('<pre><code>' + esc(code.join('\n')) + '</code></pre>');
+        out.push(codeBlockHtml(code.join('\n'), codeLang));
         inCode = false;
+        codeLang = '';
       }
       continue;
     }
@@ -200,7 +309,7 @@ function md(src) {
     para.push(esc(line));
   }
 
-  if (inCode) out.push('<pre><code>' + esc(code.join('\n')) + '</code></pre>');
+  if (inCode) out.push(codeBlockHtml(code.join('\n'), codeLang));
   flushTable();
   closePara();
   closeList();
@@ -215,6 +324,7 @@ const MODES = {
 };
 
 function currentMode() {
+  if (!state.isAdmin && ((state.plan && state.plan.id) || 'free') === 'free') return 'flash';
   const tier = (state.settings && state.settings.tier) || 'pro';
   if (tier === 'easy') return 'flash';
   // medium — старый уровень из ранних версий; в новой модели это Pro.
@@ -233,9 +343,15 @@ function tierLabel(id) {
 }
 
 // Выбранный режим сохраняется: уровень уходит на сервер, глубокое размышление — на устройство.
-async function applyMode(mode) {
+async function applyMode(mode, silent) {
   const conf = MODES[mode];
   if (!conf || !state.settings) return;
+  const planId = (state.plan && state.plan.id) || 'free';
+  if (!state.isAdmin && planId === 'free' && mode !== 'flash' && !silent) {
+    toast('Pro и Reasoning доступны на тарифах Pro и Ultra');
+    openVip();
+    return;
+  }
   state.settings.tier = conf.tier;
   state.deepMode = conf.deep;
   ui.deep = conf.deep;
@@ -243,12 +359,17 @@ async function applyMode(mode) {
   setToggle('btnDeep', 'deepMode', state.deepMode ? 'Глубокое размышление включено' : 'Глубокое размышление: максимум рассуждений');
   renderTierSelect();
   closeTierMenu();
+  if (silent) return;
   try {
-    await fetch('/api/settings', {
+    const r = await fetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tier: conf.tier })
     });
+    if (!r.ok) {
+      const j = await r.json().catch(() => null);
+      if (j && j.needPlan) openVip();
+    }
   } catch (e) {}
 }
 
@@ -311,6 +432,7 @@ function messageNode(msg, question) {
   }
 
   if (msg.image) bubble.appendChild(el('div', 'msg-attach', '📷 фото приложено'));
+  if (msg.file && msg.file.name) bubble.appendChild(el('div', 'msg-attach', '📄 ' + msg.file.name));
   if (msg.search) bubble.appendChild(el('div', 'msg-attach', '🌐 поиск: ' + msg.search));
 
   const content = el('div', 'content');
@@ -320,6 +442,7 @@ function messageNode(msg, question) {
     ? '_Модель не вернула текст ответа. Нажми «Ещё раз» или выбери другой режим._'
     : msg.content;
   content.innerHTML = md(body);
+  bindCodeCopy(content);
   bubble.appendChild(content);
 
   if (msg.role === 'assistant' && msg.content) {
@@ -473,6 +596,7 @@ function appendStreamingMessage(msg) {
       if (failed) { scrollIfNear(); return; }
       content.classList.remove('streaming');
       content.innerHTML = md(msg.content);
+      bindCodeCopy(content);
       det.open = false;
       addActions(bubble, msg, lastUserText());
       scrollIfNear();
@@ -503,30 +627,24 @@ async function streamReply(view, text, opts) {
         tier: mode.tier,
         temperature: state.settings.temperature,
         image: state.pendingImage,
+        file: opts && opts.file ? opts.file : undefined,
         web: state.webSearch,
         deep: state.deepMode,
-        adToken: state.adToken || undefined,
         regen: Boolean(opts && opts.regen)
       }),
       signal: controller.signal
     });
 
-    // Токен тратится только на Pro/глубокий режим — при обычном Easy он не должен пропадать.
-    const usedToken = Boolean(state.adToken) && (mode.tier === 'pro' || state.deepMode);
-    if (res.ok && usedToken) state.adToken = null;
-
     if (!res.ok) {
       let message = 'Ошибка ' + res.status;
-      let needVip = false;
-      // j объявлен снаружи try: раньше он был виден только внутри и обращение
-      // к j.needAuth падало с ReferenceError — окно входа не открывалось.
       let j = null;
       try {
         j = await res.json();
         if (j && j.error) message = j.error;
-        needVip = Boolean(j && j.needVip);
       } catch (e) {}
-      if (needVip) handleNeedVip();
+      if (j && j.banned) { showBan(j.ban); throw new Error(message); }
+      if (j && j.needPlan) openVip();
+      else if (j && j.limitReached) openVip();
       if (j && j.needAuth) { $('authModal').classList.remove('hidden'); }
       throw new Error(message);
     }
@@ -582,6 +700,7 @@ async function streamReply(view, text, opts) {
     setStreamingUI(false);
     view.finish();
     await loadChats();
+    await refreshAccount();
   }
 }
 
@@ -602,16 +721,24 @@ async function retryLast() {
 async function send() {
   const input = $('input');
   let text = input.value.trim();
-  if ((!text && !state.pendingImage) || state.streaming) return;
+  const attachedFile = state.pendingFile;
+  if ((!text && !state.pendingImage && !attachedFile) || state.streaming) return;
+  if (state.banned) { showBan(state.banned); return; }
   if (!state.hasKey) { renderMessages(); toast('Сначала добавь API-ключ NVIDIA'); return; }
   if (!state.currentId) await newChat(true);
   if (state.pendingImage && !text) text = 'Проанализируй это фото.';
   if (state.pendingImage) text += '\n(приложено фото — проанализируй его)';
+  if (attachedFile && !text) text = 'Проанализируй приложенный файл.';
 
   input.value = '';
   resizeInput();
 
-  const userMsg = { role: 'user', content: text.trim(), image: Boolean(state.pendingImage) };
+  const userMsg = {
+    role: 'user',
+    content: text.trim(),
+    image: Boolean(state.pendingImage),
+    file: attachedFile ? { name: attachedFile.name, type: attachedFile.type } : undefined
+  };
   state.messages.push(userMsg);
   const box = $('messages');
   const welcome = box.querySelector('.welcome');
@@ -623,19 +750,60 @@ async function send() {
   const msg = { role: 'assistant', content: '', reasoning: '' };
   state.messages.push(msg);
   const view = appendStreamingMessage(msg);
-  await streamReply(view, userMsg.content);
-  clearPendingImage();
+  try {
+    await streamReply(view, userMsg.content, { file: attachedFile || undefined });
+  } finally {
+    clearPendingImage();
+  }
 }
 
 let pendingImageData = null;
+function formatBytes(n) {
+  const size = Number(n) || 0;
+  if (size < 1024) return size + ' Б';
+  if (size < 1024 * 1024) return (size / 1024).toFixed(1).replace('.0', '') + ' КБ';
+  return (size / (1024 * 1024)).toFixed(1) + ' МБ';
+}
+
+function renderAttachment() {
+  const wrap = $('imgPreview');
+  if (!wrap) return;
+  const hasImage = Boolean(state.pendingImage);
+  const hasFile = Boolean(state.pendingFile);
+  wrap.classList.toggle('hidden', !hasImage && !hasFile);
+  $('previewThumb').classList.toggle('hidden', !hasImage);
+  $('previewFile').classList.toggle('hidden', !hasFile);
+  if (hasImage) $('previewThumb').src = state.pendingImage;
+  if (hasFile) {
+    $('previewName').textContent = state.pendingFile.name;
+    $('previewMeta').textContent = formatBytes(state.pendingFile.size) + ' · текст';
+    $('previewIcon').textContent = '📄';
+  }
+}
+
 function setPendingImage(dataUrl) {
   pendingImageData = dataUrl;
-  state.pendingImage = dataUrl;
-  const wrap = $('imgPreview');
-  if (dataUrl) { $('previewThumb').src = dataUrl; wrap.classList.remove('hidden'); }
-  else wrap.classList.add('hidden');
+  state.pendingImage = dataUrl || null;
+  if (dataUrl) state.pendingFile = null;
+  renderAttachment();
 }
-function clearPendingImage() { setPendingImage(null); $('fileInput').value = ''; $('cameraInput').value = ''; }
+
+function setPendingFile(file) {
+  state.pendingFile = file || null;
+  if (file) {
+    state.pendingImage = null;
+    pendingImageData = null;
+  }
+  renderAttachment();
+}
+
+function clearPendingImage() {
+  state.pendingImage = null;
+  state.pendingFile = null;
+  pendingImageData = null;
+  renderAttachment();
+  ['fileInput', 'cameraInput', 'anyFileInput'].forEach((id) => { if ($(id)) $(id).value = ''; });
+}
 
 function setToggle(id, key, title) {
   const b = $(id);
@@ -643,63 +811,281 @@ function setToggle(id, key, title) {
   b.title = title;
 }
 
+function currentPlanData() {
+  const plans = state.plans || PLANS_FALLBACK;
+  const id = (state.plan && state.plan.id) || 'free';
+  return plans[id] || PLANS_FALLBACK[id] || PLANS_FALLBACK.free;
+}
+
+function formatPlanUntil(ts) {
+  if (!ts) return 'бессрочно';
+  try {
+    return 'до ' + new Date(ts).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+  } catch (e) { return ''; }
+}
+
+const AD_UNIT_HTML = `
+  <input autocomplete="off" type="checkbox" id="aadsstickymwxj8cwh" hidden>
+  <div style="padding-top:0;padding-bottom:0">
+    <div style="width:15%;height:100%;position:fixed;text-align:center;font-size:0;top:50%;transform:translateY(-50%);right:0;min-width:100px">
+      <label for="aadsstickymwxj8cwh" style="bottom:24px;margin:0 auto;right:0;left:0;max-width:24px;position:absolute;border-radius:4px;background:rgba(248,248,249,.7);padding:4px;z-index:99999;cursor:pointer">
+        <svg fill="#000000" height="16px" width="16px" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 490 490"><polygon points="456.851,0 245,212.564 33.149,0 0.708,32.337 212.669,245.004 0.708,457.678 33.149,490 245,277.443 456.851,490 489.292,457.678 277.331,245.004 489.292,32.337"/></svg>
+      </label>
+      <div id="frame" style="width:100%;margin:auto;position:relative;z-index:99998;height:100%;display:flex;flex-direction:column;justify-content:center">
+        <iframe data-aa="2463382" src="//acceptable.a-ads.com/2463382/?size=Adaptive" style="border:0;padding:0;width:70%;height:70%;overflow:hidden;margin:0 auto"></iframe>
+      </div>
+    </div>
+    <style>#aadsstickymwxj8cwh:checked + div{display:none}</style>
+  </div>`;
+
+function applyAdVisibility() {
+  if (!state.booted) return;
+  const ads = state.settings && state.settings.ads ? state.settings.ads : { mode: 'free' };
+  const plan = (state.plan && state.plan.id) || 'free';
+  const show = ads.mode !== 'off' && ads.show !== false && plan === 'free' && !state.banned && !state.isAdmin;
+  let unit = $('adUnit');
+  if (show && !unit) {
+    unit = document.createElement('div');
+    unit.id = 'adUnit';
+    unit.className = 'ad-unit';
+    unit.style.position = 'absolute';
+    unit.style.zIndex = '99999';
+    unit.innerHTML = AD_UNIT_HTML;
+    document.body.appendChild(unit);
+  } else if (!show && unit) {
+    unit.remove();
+  }
+  document.body.classList.toggle('ads-off', !show);
+}
+
+
+function updatePlanUI() {
+  const plan = (state.plan && state.plan.id) || 'free';
+  const label = (state.plan && state.plan.label) || (PLANS_FALLBACK[plan] && PLANS_FALLBACK[plan].label) || 'Free';
+  const limit = (state.plan && state.plan.limit) || (PLANS_FALLBACK[plan] && PLANS_FALLBACK[plan].limit) || 10;
+  const used = state.usage ? Number(state.usage.used) || 0 : 0;
+  const meter = $('planMeter');
+  if (meter) {
+    meter.textContent = label + ' · ' + used + ' / ' + limit;
+    meter.className = 'plan-meter plan-' + plan + (used >= limit ? ' limit' : '');
+    meter.title = 'Тариф ' + label + ': ' + used + ' из ' + limit + ' запросов сегодня';
+  }
+  if (!state.user || !state.isAdmin) {
+    // Free не должен оставлять выбранным Pro после выхода/истечения подписки.
+    if (plan === 'free' && (currentMode() !== 'flash' || state.deepMode)) {
+      state.deepMode = false;
+      applyMode('flash', true);
+    }
+  }
+  const avatar = $('railAvatar');
+  if (avatar) avatar.className = 'rail-avatar plan-' + plan;
+}
+
+async function refreshAccount() {
+  try {
+    const j = await (await fetch('/api/state')).json();
+    state.hasKey = Boolean(j.hasKey);
+    state.hint = j.hint || null;
+    state.settings = j.settings || state.settings;
+    state.plans = j.plans || state.plans;
+    state.user = j.user || null;
+    state.plan = j.plan || null;
+    state.usage = j.usage || null;
+    state.isAdmin = Boolean(j.isAdmin);
+    state.banned = j.banned || null;
+    if (state.banned) showBan(state.banned);
+    else hideBan();
+    const paid = (state.plan && state.plan.id) !== 'free' || state.isAdmin;
+    if (paid && ui.deep && !state.deepMode) {
+      state.deepMode = true;
+      setToggle('btnDeep', 'deepMode', 'Глубокое размышление включено');
+    }
+    if (!paid) state.deepMode = false;
+    updatePlanUI();
+    applyAdVisibility();
+    renderTierSelect();
+    renderAuth();
+    if (!$('vipModal').classList.contains('hidden')) renderPlanModal();
+  } catch (e) {}
+}
+
 async function initAuth() {
   state.user = null;
-  try { const j = await (await fetch('/api/me')).json(); state.user = j.user; } catch (e) {}
-  renderAuth();
+  state.plan = null;
+  await refreshAccount();
 }
 
 function renderAuth() {
   const box = $('sideAuth');
   box.innerHTML = '';
   const av = $('railAvatar');
+  const initial = state.user && (state.user.name || state.user.email) ? String(state.user.name || state.user.email).trim().charAt(0) : '?';
   if (av) {
-    const first = state.user && state.user.email ? state.user.email.trim().charAt(0) : 'К';
-    av.textContent = (first || 'К').toUpperCase();
+    av.textContent = (initial || '?').toUpperCase();
     av.title = state.user ? state.user.email : 'Войти или создать аккаунт';
+    av.className = 'rail-avatar plan-' + ((state.plan && state.plan.id) || 'free');
   }
-  if (state.user) {
-    const b = document.createElement('button');
-    b.className = 'auth-btn' + (state.user.vip ? ' vip-on' : '');
-    b.textContent = state.user.vip
-      ? 'VIP активен · ' + state.user.email
-      : 'Аккаунт: ' + state.user.email + ' · VIP ✨';
-    b.addEventListener('click', () => openVip());
-    box.appendChild(b);
-  } else {
+  if (!state.user) {
     const b = document.createElement('button');
     b.className = 'auth-btn';
     b.textContent = 'Войти или создать аккаунт';
     b.addEventListener('click', () => $('authModal').classList.remove('hidden'));
     box.appendChild(b);
+    return;
   }
+  const plan = (state.plan && state.plan.id) || 'free';
+  const planLabel = (state.plan && state.plan.label) || PLANS_FALLBACK[plan].label;
+  const limit = (state.plan && state.plan.limit) || PLANS_FALLBACK[plan].limit;
+  const used = state.usage ? Number(state.usage.used) || 0 : 0;
+  const card = el('div', 'profile-card');
+  const head = el('div', 'profile-head');
+  const portrait = el('div', 'profile-avatar plan-' + plan, String(state.user.name || state.user.email).charAt(0).toUpperCase());
+  const info = el('div', 'profile-info');
+  info.append(el('b', 'profile-name', state.user.name || state.user.email.split('@')[0]), el('small', 'profile-email', state.user.email));
+  const badge = el('span', 'plan-badge plan-' + plan, planLabel);
+  head.append(portrait, info, badge);
+  card.appendChild(head);
+  const meter = el('div', 'profile-meter');
+  const bar = el('span');
+  bar.style.width = Math.min(100, limit ? (used / limit) * 100 : 0) + '%';
+  const track = el('div', 'profile-meter-track');
+  track.appendChild(bar);
+  meter.append(track, el('small', null, used + ' / ' + limit + ' запросов сегодня'));
+  card.appendChild(meter);
+  if (plan !== 'free') card.appendChild(el('small', 'profile-until', 'Подписка ' + formatPlanUntil(state.user.planExpiresAt)));
+  const actions = el('div', 'profile-actions');
+  const planBtn = el('button', 'profile-btn primary-soft', 'Сменить план');
+  planBtn.onclick = openVip;
+  actions.appendChild(planBtn);
+  if (state.isAdmin || state.user.role === 'admin') {
+    const adminLink = document.createElement('a');
+    adminLink.href = '/admin';
+    adminLink.className = 'profile-btn';
+    adminLink.textContent = 'Админка';
+    actions.appendChild(adminLink);
+  }
+  const logout = el('button', 'profile-btn danger-soft', 'Выйти');
+  logout.onclick = logoutUser;
+  actions.appendChild(logout);
+  card.appendChild(actions);
+  box.appendChild(card);
+}
+
+async function logoutUser() {
+  try { await fetch('/api/logout', { method: 'POST' }); } catch (e) {}
+  // Если открыта админ-сессия, выходим и из неё: иначе гость остаётся с правами админа.
+  if (state.isAdmin) {
+    try { await fetch('/api/admin/logout', { method: 'POST' }); } catch (e) {}
+  }
+  state.user = null;
+  state.plan = null;
+  state.usage = null;
+  state.isAdmin = false;
+  state.banned = null;
+  hideBan();
+  renderAuth();
+  updatePlanUI();
+  location.href = '/';
+}
+
+function showBan(ban) {
+  if (!ban) return hideBan();
+  state.banned = ban;
+  applyAdVisibility();
+  $('banReason').textContent = 'Причина: ' + (ban.reason || 'не указана');
+  $('banUntil').textContent = ban.forever || !ban.until
+    ? 'Блокировка бессрочная.'
+    : 'До: ' + new Date(ban.until).toLocaleString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  $('banScreen').classList.remove('hidden');
+  document.body.classList.add('banned');
+}
+
+function hideBan() {
+  const screen = $('banScreen');
+  if (screen) screen.classList.add('hidden');
+  document.body.classList.remove('banned');
 }
 
 function openVip() {
-  // «Сменить план» всегда показывает тарифы. Если гость — предлагаем войти
-  // прямо из окна, а не подменяем его формой входа.
   $('vipModal').classList.remove('hidden');
-  const priceEl = $('vipPrice');
-  const cEl = $('vipCountry');
+  renderPlanModal();
+}
+
+function renderPlanModal() {
+  const plans = state.plans || PLANS_FALLBACK;
+  const active = currentPlanData();
+  const activeId = active.id || 'free';
+  const used = state.usage ? Number(state.usage.used) || 0 : 0;
+  const limit = active.limit || 10;
+  $('planCurrent').textContent = active.label || 'Free';
+  $('planCurrentMeta').textContent = activeId === 'free'
+    ? limit + ' запросов в день · только Flash'
+    : (limit + ' запросов в день · ' + formatPlanUntil(state.user && state.user.planExpiresAt));
+  $('planUsage').textContent = 'Сегодня использовано ' + used + ' из ' + limit;
+
+  const grid = $('planGrid');
+  grid.innerHTML = '';
+  ['free', 'pro', 'ultra'].forEach((id) => {
+    const p = plans[id] || PLANS_FALLBACK[id];
+    const card = el('div', 'plan-card plan-' + id + (id === activeId ? ' active' : ''));
+    if (id === 'ultra') card.classList.add('featured');
+    const top = el('div', 'plan-card-top');
+    top.append(el('span', 'plan-card-name', p.label));
+    if (id === 'pro') top.append(el('span', 'plan-pop', 'популярный'));
+    if (id === 'ultra') top.append(el('span', 'plan-pop', 'максимум'));
+    card.appendChild(top);
+    const price = el('div', 'plan-price');
+    if (p.price) {
+      price.append(el('b', null, String(p.price)), el('small', null, ' сом / мес'));
+    } else {
+      price.append(el('b', null, '0'), el('small', null, ' сом'));
+    }
+    card.appendChild(price);
+    const list = el('ul', 'plan-features');
+    if (id === 'free') {
+      list.append(el('li', null, '10 запросов в день'), el('li', null, 'Flash — быстрые ответы'), el('li', null, 'Без Pro и Reasoning'));
+    } else {
+      list.append(el('li', null, p.limit + ' запросов в день'), el('li', null, 'Flash, Pro и Reasoning'), el('li', null, 'Без рекламы'));
+    }
+    card.appendChild(list);
+    const btn = el('button', 'plan-select' + (id === activeId ? ' current' : ''));
+    if (id === activeId) {
+      btn.textContent = 'Текущий тариф';
+      btn.disabled = true;
+    } else if (id === 'free') {
+      btn.textContent = 'Базовый';
+      btn.disabled = true;
+    } else if (!state.user) {
+      btn.textContent = 'Войти в аккаунт';
+      btn.onclick = () => {
+        $('vipModal').classList.add('hidden');
+        $('authModal').classList.remove('hidden');
+      };
+    } else {
+      btn.textContent = 'Выбрать ' + p.label;
+      btn.onclick = () => {
+        $('vipCode').focus();
+        $('vipNote').textContent = 'Оплата по договорённости с Photonn: получи промокод у администратора и активируй его ниже.';
+      };
+    }
+    card.appendChild(btn);
+    grid.appendChild(card);
+  });
+
+  const promo = document.querySelector('.plan-promo');
+  const code = $('vipCode');
+  const submit = $('vipActivate');
   const note = $('vipNote');
-  priceEl.textContent = '49 сом / мес';
-  cEl.textContent = '';
-  fetch('/api/price').then((r) => r.json()).then((j) => {
-    priceEl.textContent = j.price + ' ' + j.symbol + ' / мес';
-    cEl.textContent = j.country && j.country !== 'KG' ? 'цена для твоей страны (' + j.country + ')' : '';
-  }).catch(() => {});
   if (!state.user) {
-    $('vipCode').hidden = true;
-    $('vipActivate').textContent = 'Войти и активировать';
-    note.textContent = 'Войди или создай бесплатный аккаунт — после этого можно ввести промокод.';
-  } else if (state.user.vip) {
-    $('vipCode').hidden = true;
-    $('vipActivate').textContent = 'VIP уже активен ✓';
-    note.textContent = 'Подписка активна: Pro и глубокие размышления доступны.';
+    if (promo) promo.classList.add('hidden');
+    submit.textContent = 'Войти в аккаунт';
+    if (note) note.textContent = 'Войди или создай бесплатный аккаунт — после этого можно активировать промокод.';
   } else {
-    $('vipCode').hidden = false;
-    $('vipActivate').textContent = 'Активировать промокод';
-    note.textContent = 'Оплата пока по договорённости с Photonn — введи полученный промокод.';
+    if (promo) promo.classList.remove('hidden');
+    submit.textContent = 'Активировать';
+    if (note) note.textContent = activeId === 'free'
+      ? 'Оплата по договорённости с Photonn. Введи промокод, чтобы открыть Pro или Ultra.'
+      : 'Подписка активна. Промокод продлит текущий тариф.';
   }
 }
 
@@ -723,10 +1109,15 @@ function initAuthUI() {
       });
       const j = await r.json();
       if (!r.ok) { toast(j.error || 'Ошибка'); return; }
-      state.user = { email: j.email, vip: j.vip };
       $('authModal').classList.add('hidden');
       $('authPass').value = '';
-      renderAuth();
+      await refreshAccount();
+      // У гостя и аккаунта разные владельцы чатов: после входа показываем историю аккаунта.
+      state.currentId = null;
+      state.messages = [];
+      await loadChats();
+      if (state.chats.length) await openChat(state.chats[0].id);
+      else { renderMessages(); updateCrumb(); }
       toast(authMode === 'register' ? 'Аккаунт создан' : 'Вход выполнен');
     } catch (e) { toast('Сеть недоступна'); }
   });
@@ -740,9 +1131,10 @@ function initAuthUI() {
       $('authModal').classList.remove('hidden');
       return;
     }
-    if (state.user.vip) { $('vipModal').classList.add('hidden'); return; }
     const code = $('vipCode').value.trim();
-    if (!code) { toast('Введи промокод'); return; }
+    if (!code) { toast('Введи промокод'); $('vipCode').focus(); return; }
+    const btn = $('vipActivate');
+    btn.disabled = true;
     try {
       const r = await fetch('/api/vip/activate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -750,75 +1142,24 @@ function initAuthUI() {
       });
       const j = await r.json();
       if (!r.ok) { toast(j.error || 'Ошибка'); return; }
-      state.user.vip = true;
-      renderAuth();
+      $('vipCode').value = '';
+      await refreshAccount();
       $('vipModal').classList.add('hidden');
-      toast('VIP активирован ✨');
+      toast('Тариф ' + (j.plan && j.plan.planLabel ? j.plan.planLabel : 'активирован') + ' активирован ✨');
     } catch (e) { toast('Сеть недоступна'); }
+    finally { btn.disabled = false; }
   });
-  $('adEarn').addEventListener('click', async () => {
-    if (!state.user) { toast('Сначала войди в аккаунт — это бесплатно'); return; }
-    const btn = $('adEarn');
-    const box = $('adBox');
-    let adConf = null;
-    try { adConf = await (await fetch('/api/ads/config')).json(); } catch (e) {}
-    if (adConf && adConf.enabled && adConf.client) {
-      // Настоящий блок AdSense: скрипт подключается один раз за страницу.
-      box.classList.remove('hidden');
-      box.innerHTML = '';
-      if (!window.adsbygoogle) {
-        const s = document.createElement('script');
-        s.async = true;
-        s.src = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=' + encodeURIComponent(adConf.client);
-        s.crossOrigin = 'anonymous';
-        document.head.appendChild(s);
-        window.adsbygoogle = [];
-      }
-      const ins = document.createElement('ins');
-      ins.className = 'adsbygoogle';
-      ins.style.display = 'block';
-      ins.style.minHeight = '110px';
-      if (adConf.slot) ins.setAttribute('data-ad-slot', adConf.slot);
-      ins.setAttribute('data-ad-client', adConf.client);
-      ins.setAttribute('data-ad-format', 'auto');
-      ins.setAttribute('data-full-width-responsive', 'true');
-      box.appendChild(ins);
-      try { window.adsbygoogle.push({}); } catch (e) {}
-    } else {
-      box.classList.add('hidden');
-    }
-    let left = adConf && adConf.enabled ? 15 : 10;
-    btn.disabled = true;
-    const t = setInterval(() => { btn.textContent = '🎬 Реклама… ' + left; left--; }, 1000);
-    await new Promise((r) => setTimeout(r, (adConf && adConf.enabled ? 15 : 10) * 1000 + 500));
-    clearInterval(t);
-    btn.textContent = '🎬 Смотреть рекламу → 1 запрос Pro';
-    btn.disabled = false;
-    box.classList.add('hidden');
-    box.innerHTML = '';
-    try {
-      const r = await fetch('/api/ad/earn', { method: 'POST' });
-      const j = await r.json();
-      if (!r.ok) { toast(j.error || 'Ошибка'); return; }
-      state.adToken = j.token;
-      $('vipModal').classList.add('hidden');
-      toast('Готово: следующий запрос Pro — бесплатно ✓');
-    } catch (e) { toast('Сеть недоступна'); }
-  });
+  $('banLogout').addEventListener('click', logoutUser);
 }
 initAuthUI();
 initAuth();
 
-const VIP_HINT = 'Pro и 🧠 глубокое размышление — в VIP (49 сом/мес, цена в твоей валюте в VIP-панели).';
-function handleNeedVip() {
-  openVip();
-  toast(VIP_HINT);
-}
-
 function initTools() {
   state.pendingImage = null;
+  state.pendingFile = null;
   state.webSearch = false;
-  state.deepMode = Boolean(ui.deep);
+  const planId = (state.plan && state.plan.id) || 'free';
+  state.deepMode = Boolean(ui.deep) && (planId !== 'free' || state.isAdmin);
 
   $('btnPhoto').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -838,11 +1179,10 @@ function initTools() {
   });
   $('btnCamera').addEventListener('click', () => $('cameraInput').click());
 
-  // Голосовой ввод: Web Speech API есть в Chrome, Edge и Safari — где нет, кнопку не показываем.
+  // Голосовой ввод: там, где Web Speech API нет, работает понятная демо-подстановка.
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const mic = $('btnMic');
   if (SR) {
-    const mic = $('btnMic');
-    mic.hidden = false;
     let rec = null;
     mic.addEventListener('click', () => {
       if (rec) { rec.stop(); return; }
@@ -860,33 +1200,69 @@ function initTools() {
       };
       rec.onerror = (ev) => {
         if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') toast('Браузер не дал доступ к микрофону');
+        else if (ev.error === 'network') toast('Голосовой ввод недоступен без сети');
       };
       rec.onend = () => { rec = null; mic.classList.remove('on'); $('input').focus(); };
       try { rec.start(); } catch (e) { rec = null; mic.classList.remove('on'); }
     });
-  }
-  for (const inp of ['fileInput', 'cameraInput', 'anyFileInput']) {
-    $(inp).addEventListener('change', () => {
-      const f = $(inp).files[0];
-      if (!f) return;
-      if (!/^image\//.test(f.type)) {
-        toast('Сейчас модель читает только изображения: PNG, JPEG или WebP');
-        $(inp).value = '';
-        return;
-      }
-      if (f.size > 6 * 1024 * 1024) { toast('Фото больше 6 МБ — выбери поменьше'); $(inp).value = ''; return; }
-      const r = new FileReader();
-      r.onload = () => setPendingImage(String(r.result));
-      r.readAsDataURL(f);
-      $(inp).value = '';
+  } else {
+    mic.title = 'Голосовой ввод (демо)';
+    mic.addEventListener('click', () => {
+      const input = $('input');
+      if (input.value.trim()) { toast('Очисти поле, чтобы попробовать демо-ввод'); return; }
+      toast('Браузер не поддерживает распознавание — подставляю демо-фразу');
+      setTimeout(() => {
+        input.value = 'Помоги составить план на день и выделить главное';
+        resizeInput();
+        input.focus();
+      }, 450);
     });
   }
+
+  const readImage = (inp) => {
+    const f = $(inp).files[0];
+    if (!f) return;
+    if (!/^image\//.test(f.type)) { toast('Выбери изображение PNG, JPEG или WebP'); $(inp).value = ''; return; }
+    if (f.size > 6 * 1024 * 1024) { toast('Фото больше 6 МБ — выбери поменьше'); $(inp).value = ''; return; }
+    const r = new FileReader();
+    r.onload = () => setPendingImage(String(r.result));
+    r.readAsDataURL(f);
+    $(inp).value = '';
+  };
+  $('fileInput').addEventListener('change', () => readImage('fileInput'));
+  $('cameraInput').addEventListener('change', () => readImage('cameraInput'));
+  $('anyFileInput').addEventListener('change', () => {
+    const inp = $('anyFileInput');
+    const f = inp.files[0];
+    if (!f) return;
+    if (f.size > 512 * 1024) { toast('Текстовый файл больше 512 КБ — выбери поменьше'); inp.value = ''; return; }
+    const okExt = /\.(txt|md|markdown|csv|json|js|ts|css|html|py|java|sql|log|xml|ya?ml)$/i.test(f.name);
+    if (!okExt && !/^text\//.test(f.type) && f.type !== 'application/json') {
+      toast('Поддерживаются текстовые файлы: TXT, MD, CSV, JSON, код');
+      inp.value = '';
+      return;
+    }
+    const r = new FileReader();
+    r.onload = () => {
+      const content = String(r.result || '');
+      if (!content.trim()) { toast('Файл пустой'); return; }
+      setPendingFile({ name: f.name, size: f.size, type: f.type || 'text/plain', content: content.slice(0, 200000) });
+    };
+    r.onerror = () => toast('Не удалось прочитать файл');
+    r.readAsText(f);
+    inp.value = '';
+  });
   $('imgRemove').addEventListener('click', clearPendingImage);
   $('btnWeb').addEventListener('click', () => {
     state.webSearch = !state.webSearch;
     setToggle('btnWeb', 'webSearch', state.webSearch ? 'Веб-поиск включён' : 'Веб-поиск: модель найдёт свежие данные');
   });
   $('btnDeep').addEventListener('click', () => {
+    if (!state.isAdmin && ((state.plan && state.plan.id) || 'free') === 'free') {
+      toast('Reasoning доступен на тарифе Pro или Ultra');
+      openVip();
+      return;
+    }
     state.deepMode = !state.deepMode;
     ui.deep = state.deepMode;
     saveUi();
@@ -914,19 +1290,27 @@ async function newChat(silent) {
   try {
     const r = await fetch('/api/chats', { method: 'POST' });
     const j = await r.json();
-    if (!r.ok || !j.chat) { toast((j && j.error) || 'Не удалось создать чат'); return null; }
+    if (!r.ok || !j.chat) {
+      if (j && j.banned) showBan(j.ban);
+      toast((j && j.error) || 'Не удалось создать чат');
+      return null;
+    }
     state.currentId = j.chat.id;
     state.messages = [];
     await loadChats();
     if (!silent) renderMessages();
+    $('input').focus();
     return j.chat.id;
   } catch (e) { toast('Нет связи с сервером'); return null; }
-  $('input').focus();
 }
 
 async function openChat(id) {
   const r = await fetch('/api/chats/' + id);
-  if (!r.ok) return;
+  if (!r.ok) {
+    const j = await r.json().catch(() => null);
+    if (j && j.banned) showBan(j.ban);
+    return;
+  }
   const j = await r.json();
   state.currentId = id;
   state.messages = j.chat.messages || [];
@@ -941,6 +1325,12 @@ async function loadChats() {
   try {
     const r = await fetch('/api/chats');
     const j = await r.json();
+    if (!r.ok) {
+      if (j && j.banned) showBan(j.ban);
+      state.chats = [];
+      renderChatList();
+      return;
+    }
     state.chats = j.chats || [];
     renderChatList();
   } catch (e) {}
@@ -953,20 +1343,67 @@ function renderChatList() {
 
   for (const c of state.chats) {
     const item = el('div', 'chat-item' + (c.id === state.currentId ? ' active' : ''));
-    item.appendChild(el('div', 'chat-title', c.title || 'Без названия'));
+    const title = el('div', 'chat-title', c.title || 'Без названия');
+    const tools = el('div', 'chat-tools');
 
-    const del = el('button', 'chat-del', '✕');
+    const rename = el('button', 'chat-tool', '✎');
+    rename.title = 'Переименовать чат';
+    rename.setAttribute('aria-label', 'Переименовать чат');
+    rename.onclick = (e) => {
+      e.stopPropagation();
+      const input = document.createElement('input');
+      input.className = 'chat-rename';
+      input.value = c.title || 'Без названия';
+      input.maxLength = 100;
+      title.replaceWith(input);
+      input.focus();
+      input.select();
+      let finished = false;
+      const restore = () => { if (!finished) { finished = true; input.replaceWith(title); } };
+      const commit = async () => {
+        if (finished) return;
+        const value = input.value.replace(/\s+/g, ' ').trim();
+        if (!value || value === c.title) { finished = true; input.replaceWith(title); return; }
+        finished = true;
+        try {
+          const r = await fetch('/api/chats/' + encodeURIComponent(c.id), {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: value })
+          });
+          if (!r.ok) throw new Error();
+          c.title = value;
+          title.textContent = value;
+          input.replaceWith(title);
+          updateCrumb();
+        } catch (err) {
+          input.replaceWith(title);
+          toast('Не удалось переименовать чат');
+        }
+      };
+      input.onclick = (ev) => ev.stopPropagation();
+      input.onblur = commit;
+      input.onkeydown = (ev) => {
+        if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+        else if (ev.key === 'Escape') { finished = true; input.replaceWith(title); }
+      };
+    };
+
+    const del = el('button', 'chat-tool danger', '✕');
+    del.title = 'Удалить чат';
+    del.setAttribute('aria-label', 'Удалить чат');
     del.onclick = async (e) => {
       e.stopPropagation();
       if (!confirm('Удалить этот чат?')) return;
-      await fetch('/api/chats/' + c.id, { method: 'DELETE' });
+      await fetch('/api/chats/' + encodeURIComponent(c.id), { method: 'DELETE' });
       if (state.currentId === c.id) { state.currentId = null; state.messages = []; }
       await loadChats();
       if (state.chats.length) await openChat(state.chats[0].id);
       else renderMessages();
     };
 
-    item.append(del);
+    tools.append(rename, del);
+    item.append(title, tools);
     item.onclick = () => { openChat(c.id); document.body.classList.remove('side-open'); };
     box.appendChild(item);
   }
@@ -974,11 +1411,17 @@ function renderChatList() {
 
 function renderTierSelect() {
   const mode = currentMode();
+  const free = ((state.plan && state.plan.id) || 'free') === 'free' && !state.isAdmin;
   document.querySelectorAll('#tierSelect button').forEach((b) => {
+    const locked = free && b.dataset.mode !== 'flash';
     b.classList.toggle('on', b.dataset.mode === mode);
+    b.classList.toggle('locked', locked);
+    b.setAttribute('aria-disabled', locked ? 'true' : 'false');
   });
   const label = $('tierLabel');
   if (label) label.textContent = modeLabel();
+  const btn = $('tierBtn');
+  if (btn) btn.classList.toggle('is-free', free);
 }
 
 function applyTierModels(j) {
@@ -1102,6 +1545,7 @@ function bind() {
   on('installClose', () => $('installModal').classList.add('hidden'));
   on('installNow', installApp);
   on('btnPlan', openVip);
+  on('planMeter', openVip);
   on('tierBtn', () => {
     const menu = $('tierSelect');
     if (!menu) return;
@@ -1155,6 +1599,7 @@ function bind() {
   tap('tierSelect', 'click', (e) => {
     const b = e.target.closest('button[data-mode]');
     if (!b) return;
+    if (b.getAttribute('aria-disabled') === 'true') { openVip(); return; }
     applyMode(b.dataset.mode);
   });
 }
@@ -1167,10 +1612,28 @@ async function init() {
     state.hasKey = st.hasKey;
     state.hint = st.hint;
     state.settings = st.settings;
+    state.plans = st.plans || PLANS_FALLBACK;
+    state.user = st.user || state.user;
+    state.plan = st.plan || state.plan;
+    state.usage = st.usage || state.usage;
+    state.isAdmin = Boolean(st.isAdmin || state.isAdmin);
+    state.banned = st.banned || state.banned;
+    if (state.banned) showBan(state.banned);
+    if (!state.isAdmin && ((state.plan && state.plan.id) || 'free') === 'free') {
+      state.deepMode = false;
+      applyMode('flash', true);
+    } else if (ui.deep) {
+      state.deepMode = true;
+    }
     applyTierModels(st);
     updateLearnState();
-    await loadChats();
+    state.booted = true;
+    updatePlanUI();
+    applyAdVisibility();
+    renderAuth();
     renderTierSelect();
+    if (state.banned) { renderMessages(); return; }
+    await loadChats();
     if (state.chats.length) await openChat(state.chats[0].id);
     else renderMessages();
   } catch (e) {

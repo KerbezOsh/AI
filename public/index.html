@@ -10,7 +10,7 @@
 <link rel='apple-touch-icon' href='/icon-192.png'>
 <meta name='apple-mobile-web-app-capable' content='yes'>
 <meta name='apple-mobile-web-app-title' content='photonnAI'>
-<link rel='stylesheet' href='/style.css?v=12'>
+<link rel='stylesheet' href='/style.css?v=15'>
 <script>
   // Тему ставим до первой отрисовки, иначе при светлой теме экран мигает чёрным.
   try {
@@ -80,17 +80,29 @@
   </div>
 
   <div class='modal-back hidden' id='vipModal'>
-    <div class='modal'>
+    <div class='modal plan-modal'>
       <button class='modal-x' id='vipClose' title='Закрыть'>✕</button>
-      <h3>VIP подписка photonnAI</h3>
-      <p class='vip-desc'>Pro-модель и глубокое размышление 🧠 без ограничений</p>
-      <div class='vip-price' id='vipPrice'>49 сом / мес</div>
-      <div class='vip-country' id='vipCountry'></div>
-      <input class='field' id='vipCode' placeholder='Промокод оплаты'>
-      <button class='primary wide' id='vipActivate'>Активировать VIP</button>
-      <button class='ghost wide' id='adEarn'>🎬 Смотреть рекламу → 1 запрос Pro</button>
-      <div id='adBox' class='hidden' style='min-height:110px;margin:8px 0'></div>
-      <div class='vip-note' id='vipNote'>Оплата пока по договорённости с Photonn — введи полученный промокод.</div>
+      <div class='plan-head'>
+        <div class='logo big'>φ</div>
+        <div>
+          <h3>Тарифы photonnAI</h3>
+          <p>Выбери, сколько запросов и режимов нужно</p>
+        </div>
+      </div>
+      <div class='plan-current'>
+        <div><span class='plan-eyebrow'>Текущий тариф</span><b id='planCurrent'>Free</b></div>
+        <div class='plan-current-meta' id='planCurrentMeta'>10 запросов в день</div>
+      </div>
+      <div class='plan-grid' id='planGrid'></div>
+      <div class='plan-usage-line' id='planUsage'>Сегодня использовано 0 из 10</div>
+      <div class='plan-promo'>
+        <label for='vipCode'>Промокод</label>
+        <div class='promo-row'>
+          <input class='field' id='vipCode' placeholder='Например, PHOTONN-30'>
+          <button class='secondary' id='vipActivate'>Активировать</button>
+        </div>
+      </div>
+      <div class='vip-note' id='vipNote'>Подписку Pro или Ultra также может выдать администратор.</div>
     </div>
   </div>
 
@@ -171,7 +183,11 @@
       <div class='composer'>
         <div class='img-preview hidden' id='imgPreview'>
           <img id='previewThumb' alt='Прикреплённое фото'>
-          <button class='tool' id='imgRemove' title='Убрать фото'>✕</button>
+          <div class='preview-file hidden' id='previewFile'>
+            <span class='preview-file-ico' id='previewIcon'>📄</span>
+            <div class='preview-file-info'><b id='previewName'></b><small id='previewMeta'></small></div>
+          </div>
+          <button class='tool' id='imgRemove' title='Убрать вложение'>✕</button>
         </div>
         <div class='composer-box'>
           <div class='attach-wrap'>
@@ -185,7 +201,7 @@
             </div>
           </div>
           <input type='file' id='fileInput' accept='image/png,image/jpeg,image/webp' hidden>
-          <input type='file' id='anyFileInput' hidden>
+          <input type='file' id='anyFileInput' accept='.txt,.md,.markdown,.csv,.json,.js,.ts,.css,.html,.py,.java,.sql,.log,.xml,.yml,.yaml,text/plain,text/markdown,application/json' hidden>
           <input type='file' id='cameraInput' accept='image/*' capture='environment' hidden>
           <textarea id='input' rows='1' placeholder='Спросить photonnAI'></textarea>
           <div class='tier-wrap'>
@@ -199,7 +215,7 @@
               <button data-mode='flash' role='menuitem'><span>Flash</span> <small>быстро</small></button>
             </div>
           </div>
-          <button class='tool' id='btnMic' title='Голосовой ввод' aria-label='Голосовой ввод' hidden>
+          <button class='tool' id='btnMic' title='Голосовой ввод' aria-label='Голосовой ввод'>
             <svg width='17' height='17' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round'><rect x='9' y='3' width='6' height='11' rx='3'/><path d='M5 11a7 7 0 0 0 14 0M12 18v3'/></svg>
           </button>
           <button class='send' id='send' title='Отправить' aria-label='Отправить'>
@@ -212,7 +228,7 @@
           <button class='chip' id='btnWeb' title='Веб-поиск: модель найдёт свежие данные'>🌐 Веб-поиск</button>
           <button class='chip' id='btnDeep' title='Глубокое размышление: максимум рассуждений'>🧠 Размышления</button>
         </div>
-        <div class='composer-hint'>photonnAI может ошибаться. Проверяйте важные факты.</div>
+        <div class='composer-hint'><button class='plan-meter' id='planMeter' type='button' title='Тариф и дневной лимит'>Free · 0 / 10</button><span class='hint-dot'>·</span>photonnAI может ошибаться. Проверяйте важные факты.</div>
       </div>
     </div>
   </main>
@@ -220,35 +236,25 @@
 
 <div class='toast hidden' id='toast'></div>
 
-<!-- BEGIN AADS AD UNIT 2463382 -->
-
-<div style="position: absolute; z-index: 99999">
-      <input autocomplete="off" type="checkbox" id="aadsstickymwxj8cwh" hidden />
-      <div style="padding-top: 0; padding-bottom: 0;">
-        <div style="width:15%;height:100%;position:fixed;text-align:center;font-size:0;top:50%;transform:translateY(-50%);right:0;min-width:100px">
-          <label for="aadsstickymwxj8cwh" style="bottom: 24px;margin:0 auto;right:0;left:0;max-width:24px; position: absolute;border-radius: 4px; background: rgba(248, 248, 249, 0.70); padding: 4px;z-index: 99999;cursor:pointer">
-            <svg fill="#000000" height="16px" width="16px" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 490 490">
-              <polygon points="456.851,0 245,212.564 33.149,0 0.708,32.337 212.669,245.004 0.708,457.678 33.149,490 245,277.443 456.851,490 489.292,457.678 277.331,245.004 489.292,32.337 "/>
-            </svg>
-          </label>
-          <div id="frame" style="width: 100%;margin: auto;position: relative; z-index: 99998;height:100%; display: flex; flex-direction: column; justify-content: center">
-                        <iframe data-aa=2463382 src=//acceptable.a-ads.com/2463382/?size=Adaptive style='border:0; padding:0; width:70%; height:70%; overflow:hidden; margin: 0 auto'></iframe>
-                    </div>
-        </div>
-        <style>
-      #aadsstickymwxj8cwh:checked + div {
-        display: none;
-      }
-    </style>
-    </div></div>
-
-<!-- END AADS AD UNIT 2463382 -->
+<div class='ban-screen hidden' id='banScreen'>
+  <div class='ban-card'>
+    <div class='ban-icon'>⛔</div>
+    <h2>Аккаунт заблокирован</h2>
+    <p class='ban-reason' id='banReason'>Причина не указана</p>
+    <p class='ban-until' id='banUntil'></p>
+    <div class='ban-actions'>
+      <button class='primary' id='banLogout'>Выйти из аккаунта</button>
+      <a class='ghost ban-link' href='/' >На главную</a>
+    </div>
+    <p class='ban-help'>Если считаешь блокировку ошибкой, напиши администратору photonnAI.</p>
+  </div>
+</div>
 
 <script>
 (function () {
   if ('caches' in window) {
     caches.keys().then(function (ks) {
-      ks.forEach(function (k) { if (k.indexOf('photonn-v12') !== 0) caches.delete(k); });
+      ks.forEach(function (k) { if (k.indexOf('photonn-v15') !== 0) caches.delete(k); });
     }).catch(function () {});
   }
   if ('serviceWorker' in navigator) {
@@ -258,6 +264,6 @@
   }
 })();
 </script>
-<script src='/app.js?v=12'></script>
+<script src='/app.js?v=15'></script>
 </body>
 </html>

@@ -1051,6 +1051,14 @@ async function streamReply(view, text, opts) {
           continue;
         }
         if (j.error) throw new Error(j.error);
+        if (j.final) {
+          // Сервер досочинил текст после потока — заменяем пузырь целиком.
+          msg.content = j.final.content || '';
+          msg.reasoning = j.final.reasoning || '';
+          if (msg.content) view.setContent(msg.content);
+          if (msg.reasoning) view.setReasoning(msg.reasoning);
+          continue;
+        }
         const d = j.choices && j.choices[0] && j.choices[0].delta;
         if (!d) continue;
         if (d.reasoning_content) {

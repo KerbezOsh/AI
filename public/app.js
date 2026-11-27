@@ -1976,7 +1976,9 @@ function bind() {
   });
   tap('input', 'input', resizeInput);
   on('toggleSidebar', () => document.body.classList.toggle('side-open'));
+on('mMenu', () => document.body.classList.toggle('side-open'));
   on('newChatRail', () => newChat(false));
+on('mNew', () => newChat(false));
   on('drawerClose', () => document.body.classList.remove('side-open'));
   on('railAvatar', () => {
     if (state.user) document.body.classList.add('side-open');

@@ -876,6 +876,14 @@ function appendStreamingMessage(msg) {
   const content = el('div', 'content streaming');
   const typing = el('div', 'typing');
   typing.append(el('span'), el('span'), el('span'));
+  // Счётчик секунд ожидания: видно, что запрос жив, а не повис.
+  const startedAt = Date.now();
+  const elapsed = el('span', 'typing-elapsed');
+  typing.appendChild(elapsed);
+  let tick = setInterval(() => {
+    elapsed.textContent = Math.round((Date.now() - startedAt) / 1000) + ' с';
+  }, 1000);
+  const stopWait = () => { if (tick) { clearInterval(tick); tick = 0; } };
   content.appendChild(typing);
 
   const tag = el('div', 'model-tag hidden');
@@ -897,6 +905,7 @@ function appendStreamingMessage(msg) {
 
   const paint = () => {
     raf = 0;
+    stopWait();
     content.textContent = msg.content;
     scrollIfNear();
   };
@@ -938,12 +947,14 @@ function appendStreamingMessage(msg) {
     },
     fail(text) {
       failed = true;
+      stopWait();
       content.classList.remove('streaming');
       content.innerHTML = '<p class="error-text">' + esc(text) + '</p>';
       det.open = false;
       row.classList.add('error');
     },
     finish() {
+      stopWait();
       if (failed) { scrollIfNear(); return; }
       if (raf) { cancelAnimationFrame(raf); raf = 0; }
       const parsed = splitThinking(msg.content, msg.reasoning);

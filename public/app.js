@@ -938,6 +938,13 @@ function appendStreamingMessage(msg) {
       searchNote.classList.remove('hidden');
       scrollIfNear();
     },
+    noteRetry(n) {
+      const note = el('div', 'retry-note');
+      note.style.cssText = 'font-size:12px;color:#7d889c;margin:2px 0 5px';
+      note.textContent = 'Модель отказалась отвечать — переспрашиваю другую (попытка ' + n + ')…';
+      if (typing.parentNode) content.insertBefore(note, typing);
+      else content.appendChild(note);
+    },
     setContent(text) {
       msg.content = text;
       gotContent = Boolean(String(text).trim());
@@ -1044,6 +1051,10 @@ async function streamReply(view, text, opts) {
         if (j.meta) {
           view.setModel(j.meta.tier, j.meta.model, j.meta.fallback);
           if (j.meta.search) msg.search = j.meta.search;
+          continue;
+        }
+        if (j.status && j.status.retry) {
+          view.noteRetry(j.status.retry);
           continue;
         }
         if (j.status && j.status.search) {

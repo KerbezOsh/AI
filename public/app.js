@@ -2481,17 +2481,29 @@ function wantsImage(text) {
 }
 
 async function fetchImageObject(url) {
-  let r;
-  try { r = await fetch(url, { cache: 'no-store' }); } catch (e) { return { obj: '', retry: 0, status: 0 }; }
-  if (r.ok) {
-    const type = r.headers.get('content-type') || '';
-    if (type.indexOf('image/') !== 0) return { obj: '', retry: 0, status: r.status };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 60000);
+  try {
+    const r = await fetch(url, { cache: 'no-store', signal: ctrl.signal });
+    if (!r.ok) return { obj: '', retry: Number(r.headers.get('Retry-After')) || 0, status: r.status };
+    const type = (r.headers.get('content-type') || '').split(';')[0].toLowerCase();
+    if (!/^image\/(?:jpeg|png|webp)$/.test(type)) return { obj: '', retry: 0, status: r.status };
     const blob = await r.blob();
-    if (blob.size < 2000) return { obj: '', retry: 0, status: r.status };
-    return { obj: URL.createObjectURL(blob), retry: 0, status: r.status };
+    if (blob.size < 2000 || blob.size > 4 * 1024 * 1024) return { obj: '', retry: 0, status: r.status };
+    // Показываем и сохраняем одни и те же байты: URL генератора при повторном
+    // открытии может вернуть другой результат или упереться в лимит.
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('Could not read image'));
+      reader.readAsDataURL(blob);
+    });
+    return { obj: dataUrl, retry: 0, status: r.status };
+  } catch (e) {
+    return { obj: '', retry: 0, status: 0 };
+  } finally {
+    clearTimeout(timer);
   }
-  // Pollinations отдаёт 402 и точное время, когда освободится бесплатный слот.
-  return { obj: '', retry: Number(r.headers.get('Retry-After')) || 0, status: r.status };
 }
 
 async function renderViaServer(url) {
@@ -2526,13 +2538,13 @@ async function autoImage(prompt, opts) {
     const setNote = (t) => { if (noteText) noteText.textContent = t; };
     // 1) Pollinations напрямую — обычно мгновенно, без ключа и без сервера.
     const first = await fetchImageObject(j.urls[0]);
-    if (first.obj) { shown = first.obj; chosen = j.urls[0]; chain = j.urls.slice(1); }
+    if (first.obj) { shown = first.obj; chosen = first.obj; chain = []; }
     let waitSec = 0;
     // 2) Браузер не видит 402 из-за CORS — тогда генерирует сервер: у него
     //    отдельный IP и свой бесплатный слот.
     if (!shown) {
       const prox = await renderViaServer(j.urls[0]);
-      if (prox.dataUrl) { shown = prox.dataUrl; chosen = prox.dataUrl; chain = j.urls.slice(1); }
+      if (prox.dataUrl) { shown = prox.dataUrl; chosen = prox.dataUrl; chain = []; }
       else waitSec = prox.retry;
     }
     // 3) Все слоты заняты — ждём точное время из Retry-After и пробуем сервер ещё раз.
@@ -2543,17 +2555,17 @@ async function autoImage(prompt, opts) {
       }
       setNote(uiLang === 'en' ? 'Drawing…' : 'Рисую…');
       const prox = await renderViaServer(j.urls[0]);
-      if (prox.dataUrl) { shown = prox.dataUrl; chosen = prox.dataUrl; chain = j.urls.slice(1); }
+      if (prox.dataUrl) { shown = prox.dataUrl; chosen = prox.dataUrl; chain = []; }
       else if (prox.retry > 0 && prox.retry <= 8) {
         for (let left = prox.retry; left > 0; left--) {
           setNote((uiLang === 'en' ? 'Free limit: ' : 'Бесплатный лимит: ') + left + (uiLang === 'en' ? ' s…' : ' с…'));
           await new Promise((res) => setTimeout(res, 1000));
         }
         const again = await renderViaServer(j.urls[0]);
-        if (again.dataUrl) { shown = again.dataUrl; chosen = again.dataUrl; chain = j.urls.slice(1); }
+        if (again.dataUrl) { shown = again.dataUrl; chosen = again.dataUrl; chain = []; }
       }
     }
-    if (!shown) throw new Error(uiLang === 'en' ? 'both free services are busy, try again in a minute' : 'бесплатные сервисы заняты, попробуй через минуту');
+    if (!shown) throw new Error(uiLang === 'en' ? 'the image generator is unavailable, try again in a minute' : 'генератор картинок недоступен, попробуй через минуту');
     const caption = uiLang === 'en' ? 'Here is your picture.' : 'Картинка готова.';
     state.messages.push({ role: 'assistant', content: caption, image: shown, imageChain: chain, model: 'pollinations' });
     renderMessages();

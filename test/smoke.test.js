@@ -18,7 +18,7 @@ test('server serves shell and search/export endpoints', async (t) => {
       const exp = await (await fetch(`http://127.0.0.1:${port}/api/chats/export`)).json();
       assert.equal(home.ok, true);
       assert.ok(ht.includes('style.css?v=45'));
-      assert.ok(ht.includes('app.js?v=45'));
+      assert.ok(ht.includes('app.js?v=46'));
       assert.ok(Array.isArray(search.results));
       assert.ok(Array.isArray(exp.chats));
       ok = true;

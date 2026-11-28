@@ -554,6 +554,23 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return send(res, 200, { ok: false, error: e.message }); }
   }
 
+  if (url.pathname === '/undo' && req.method === 'POST') {
+    try {
+      await fsp.mkdir(BACKUP_DIR, { recursive: true });
+      const files = await fsp.readdir(BACKUP_DIR).catch(() => []);
+      if (!files.length) return send(res, 200, { ok: false, error: 'нет резервных копий' });
+      const sorted = files.sort();
+      const latest = sorted[sorted.length - 1];
+      const backupPath = path.join(BACKUP_DIR, latest);
+      const content = await fsp.readFile(backupPath, 'utf8');
+      const target = resolveInRoot(latest.replace(/^\d+-/, ''));
+      await fsp.mkdir(path.dirname(target), { recursive: true });
+      await fsp.writeFile(target, content, 'utf8');
+      await fsp.unlink(backupPath).catch(() => {});
+      return send(res, 200, { ok: true, restored: relOf(target) });
+    } catch (e) { return send(res, 200, { ok: false, error: e.message }); }
+  }
+
   if (url.pathname === '/mcp' && req.method === 'GET') {
     return send(res, 200, mcpState());
   }

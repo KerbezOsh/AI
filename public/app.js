@@ -2284,14 +2284,45 @@ async function loadChats() {
   } catch (e) {}
 }
 
+let chatFilter = 'all';
+async function patchChat(id, fields) {
+  const r = await fetch('/api/chats/' + encodeURIComponent(id), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields)
+  });
+  if (!r.ok) throw new Error('patch failed');
+  return r.json();
+}
 function renderChatList() {
   const box = $('chatList');
   box.innerHTML = '';
-  if (!state.chats.length) { box.appendChild(el('div', 'empty-list', 'Пока нет чатов')); return; }
-
-  for (const c of state.chats) {
-    const item = el('div', 'chat-item' + (c.id === state.currentId ? ' active' : ''));
-    const title = el('div', 'chat-title', c.title || 'Без названия');
+  const filters = el('div', 'chat-filters');
+  [['all', 'Все'], ['pinned', '📌'], ['archived', 'Архив']].forEach(([key, label]) => {
+    const b = el('button', 'chat-filter' + (chatFilter === key ? ' on' : ''), label);
+    b.type = 'button';
+    b.onclick = () => { chatFilter = key; renderChatList(); };
+    filters.appendChild(b);
+  });
+  box.appendChild(filters);
+  const list = state.chats.filter((c) => {
+    if (chatFilter === 'pinned') return c.pinned;
+    if (chatFilter === 'archived') return c.archived;
+    return !c.archived;
+  });
+  if (!list.length) { box.appendChild(el('div', 'empty-list', 'Пока нет чатов')); return; }
+  const groups = new Map();
+  for (const c of list) {
+    const key = c.folder || '';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(c);
+  }
+  for (const [folder, items] of groups) {
+    if (folder) box.appendChild(el('div', 'chat-group-label', folder));
+    for (const c of items) {
+    const item = el('div', 'chat-item' + (c.id === state.currentId ? ' active' : '') + (c.pinned ? ' pinned' : ''));
+    const title = el('div', 'chat-title', (c.pinned ? '📌 ' : '') + (c.title || 'Без названия'));
+    if (c.tags && c.tags.length) title.appendChild(el('span', 'chat-tags', c.tags.map((t) => '#' + t).join(' ')));
     const tools = el('div', 'chat-tools');
 
     const rename = el('button', 'chat-tool', '✎');
@@ -2350,10 +2381,27 @@ function renderChatList() {
       else renderMessages();
     };
 
-    tools.append(rename, del);
+    const pin = el('button', 'chat-tool', c.pinned ? '📌' : '📍');
+    pin.title = c.pinned ? 'Открепить' : 'Закрепить';
+    pin.onclick = async (e) => { e.stopPropagation(); try { await patchChat(c.id, { pinned: !c.pinned }); await loadChats(); } catch (_) { toast('Не удалось'); } };
+    const arch = el('button', 'chat-tool', c.archived ? '↩' : '🗄');
+    arch.title = c.archived ? 'Вернуть из архива' : 'В архив';
+    arch.onclick = async (e) => { e.stopPropagation(); try { await patchChat(c.id, { archived: !c.archived }); await loadChats(); } catch (_) { toast('Не удалось'); } };
+    const org = el('button', 'chat-tool', '🏷');
+    org.title = 'Папка и теги';
+    org.onclick = async (e) => {
+      e.stopPropagation();
+      const folder = prompt('Папка (пусто — без папки):', c.folder || '');
+      if (folder === null) return;
+      const tagsRaw = prompt('Теги через запятую:', (c.tags || []).join(', '));
+      if (tagsRaw === null) return;
+      try { await patchChat(c.id, { folder, tags: tagsRaw.split(',').map((t) => t.trim()).filter(Boolean) }); await loadChats(); } catch (_) { toast('Не удалось сохранить'); }
+    };
+    tools.append(pin, arch, org, rename, del);
     item.append(title, tools);
     item.onclick = () => { openChat(c.id); document.body.classList.remove('side-open'); };
     box.appendChild(item);
+    }
   }
 }
 
@@ -2644,6 +2692,14 @@ on('mNew', () => newChat(false));
   on('agentSetup', openAgentModal);
   on('agentOff', () => { agent.on = false; saveAgent(); applyAgentUI(); });
   on('agentConnect', connectAgent);
+  on('agentUndo', async () => {
+    if (!agent.token || !agent.base) { toast('Мост не подключён'); return; }
+    try {
+      const r = await fetch(agent.base + '/undo', { method: 'POST', headers: { 'x-agent-token': agent.token } });
+      const j = await r.json();
+      toast(j.ok ? 'Откачено: ' + j.restored : j.error);
+    } catch (e) { toast('Не удалось откатить'); }
+  });
   const agentCodeInput = $('agentCode');
   if (agentCodeInput) {
     agentCodeInput.addEventListener('keydown', (e) => {

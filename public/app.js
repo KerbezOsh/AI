@@ -20,6 +20,20 @@ const state = {
   booted: false,
   pendingFile: null
 };
+// Агент: мост на компьютере пользователя (public/agent/photonn-agent.js).
+// Токен и папка лежат в localStorage — без токена мост не отвечает.
+const AGENT_STORE = 'photonn.agent';
+const agent = { on: false, token: '', url: 'http://127.0.0.1:8787', root: '', connected: false, allowExec: false, autoApprove: false, busy: false };
+try {
+  const saved = JSON.parse(localStorage.getItem(AGENT_STORE) || '{}');
+  agent.token = String(saved.token || '');
+  agent.root = String(saved.root || '');
+  agent.on = Boolean(saved.on);
+} catch (e) {}
+function saveAgent() {
+  try { localStorage.setItem(AGENT_STORE, JSON.stringify({ token: agent.token, root: agent.root, on: agent.on })); } catch (e) {}
+}
+
 const PLANS_FALLBACK = {
   free: { id: 'free', label: 'Free', limit: 18, proTrial: 2, modes: ['flash', 'pro', 'reasoning'], price: 0 },
   pro: { id: 'pro', label: 'Pro', limit: 200, modes: ['flash', 'pro', 'reasoning'], price: 49 },
@@ -750,6 +764,9 @@ function messageNode(msg, question) {
   const bubble = el('div', 'bubble');
 
   const parsed = msg.role === 'assistant' ? splitThinking(msg.content, msg.reasoning) : { content: msg.content, reasoning: '' };
+  if (msg.role === 'assistant' && /```photonn-tool/.test(String(parsed.content || ''))) {
+    parsed.content = stripToolCalls(parsed.content) || '_Агент выполнял действия с файлами._';
+  }
   const body = msg.role === 'assistant' && !String(parsed.content || '').trim()
     ? (parsed.reasoning ? '_Ответа нет — смотри «Ход мыслей»._' : '_Модель не вернула текст ответа. Нажми «Ещё раз» или выбери другой режим._')
     : parsed.content;
@@ -847,7 +864,8 @@ function renderMessages() {
   if (!state.messages.length) { box.appendChild(welcomeNode()); return; }
   let question = '';
   for (const m of state.messages) {
-    if (m.role === 'user') question = m.content;
+    if (m.role === 'user' && !m.hidden) question = m.content;
+    if (m.hidden) continue;
     box.appendChild(messageNode(m, question));
   }
   box.scrollTop = box.scrollHeight;
@@ -912,6 +930,7 @@ function appendStreamingMessage(msg) {
 
   return {
     msg,
+    row,
     setReasoning(text) {
       if (!text) return;
       msg.reasoning = text;
@@ -1016,9 +1035,12 @@ async function streamReply(view, text, opts) {
         temperature: state.settings.temperature,
         image: state.pendingImage,
         file: opts && opts.file ? opts.file : undefined,
-        web: state.webSearch,
+        web: opts && opts.agent ? false : state.webSearch,
         deep: state.deepMode,
-        regen: Boolean(opts && opts.regen)
+        regen: Boolean(opts && opts.regen),
+        agent: Boolean(opts && opts.agent),
+        agentStep: Boolean(opts && opts.agentStep),
+        hidden: Boolean(opts && opts.hidden)
       }),
       signal: controller.signal
     });
@@ -1116,6 +1138,306 @@ async function streamReply(view, text, opts) {
     await loadChats();
     await refreshAccount();
   }
+  return msg.content;
+}
+
+// ── Агент: мост на компьютере, подтверждения, цикл инструментов ─────
+const AGENT_MAX_STEPS = 6;
+const AGENT_ICONS = { list: '📁', read: '📄', write: '✏️', patch: '🩹', exec: '⌘' };
+
+function shortPath(p) {
+  const parts = String(p || '').split(/[\\/]/).filter(Boolean);
+  return parts.slice(-2).join('/') || p || '.';
+}
+
+function agentStatus(text, kind) {
+  const n = $('agentStatus');
+  if (!n) return;
+  n.textContent = text;
+  n.className = 'agent-status' + (kind ? ' ' + kind : '');
+}
+
+function openAgentModal() {
+  const m = $('agentModal');
+  if (!m) return;
+  if (agent.token) $('agentToken').value = agent.token;
+  if (agent.root) $('agentRoot').value = agent.root;
+  agentStatus(agent.connected ? 'Подключено: ' + agent.root : 'Мост не подключён', agent.connected ? 'ok' : '');
+  m.classList.remove('hidden');
+  setTimeout(() => { try { $('agentToken').focus(); } catch (e) {} }, 40);
+}
+
+function closeAgentModal() {
+  const m = $('agentModal');
+  if (m) m.classList.add('hidden');
+}
+
+function applyAgentUI() {
+  const b = $('btnAgent');
+  if (b) {
+    b.classList.toggle('on', agent.on);
+    b.title = agent.on
+      ? (agent.connected ? 'Агент подключён: ' + agent.root : 'Агент включён, мост не подключён')
+      : 'Агент: доступ к файлам на компьютере';
+  }
+  const strip = $('agentStrip');
+  if (strip) {
+    strip.classList.toggle('hidden', !agent.on);
+    const t = strip.querySelector('.agent-strip-text');
+    if (t) t.textContent = agent.connected
+      ? (shortPath(agent.root) + (agent.allowExec ? ' · файлы и команды' : ' · только файлы'))
+      : 'мост не подключён';
+  }
+  const input = $('input');
+  if (input) input.placeholder = agent.on ? 'Задача агенту: что изменить в проекте…' : 'Спросить photonnAI';
+}
+
+async function agentBridge(pathname, body) {
+  const headers = { 'X-Agent-Token': agent.token };
+  if (body) headers['Content-Type'] = 'application/json';
+  let r;
+  try {
+    r = await fetch(agent.url + pathname, { method: body ? 'POST' : 'GET', headers, body: body ? JSON.stringify(body) : undefined });
+  } catch (e) {
+    throw new Error('мост не отвечает на ' + agent.url.replace('http://', '') + ' — он запущен?');
+  }
+  if (r.status === 401) throw new Error('токен не совпал — скопируй его из консоли моста');
+  let j = null;
+  try { j = await r.json(); } catch (e) {}
+  if (!r.ok || (j && j.ok === false)) throw new Error((j && j.error) || ('мост вернул ' + r.status));
+  return j || {};
+}
+
+// Молчаливое переподключение при загрузке: токен уже сохранён, мост мог остаться запущенным.
+async function autoConnectAgent() {
+  if (!agent.token) return;
+  try {
+    const info = await agentBridge('/info');
+    agent.connected = true;
+    agent.root = info.root || agent.root;
+    agent.allowExec = Boolean(info.allowExec);
+    applyAgentUI();
+  } catch (e) {
+    agent.connected = false;
+    applyAgentUI();
+  }
+}
+
+async function connectAgent() {
+  const btn = $('agentConnect');
+  agent.token = $('agentToken').value.trim();
+  const root = $('agentRoot').value.trim();
+  if (!agent.token) { agentStatus('Вставь токен из консоли моста', 'err'); return; }
+  btn.disabled = true;
+  agentStatus('Подключаюсь…');
+  try {
+    if (root) await agentBridge('/workspace', { root });
+    const info = await agentBridge('/info');
+    agent.connected = true;
+    agent.root = info.root || root;
+    agent.allowExec = Boolean(info.allowExec);
+    agent.on = true;
+    saveAgent();
+    applyAgentUI();
+    agentStatus('Подключено: ' + agent.root, 'ok');
+    closeAgentModal();
+    toast('Агент подключён · ' + shortPath(agent.root));
+  } catch (e) {
+    agent.connected = false;
+    applyAgentUI();
+    agentStatus(e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function extractToolCalls(text) {
+  const out = [];
+  const src = String(text || '');
+  const re = /```photonn-tool\s*([\s\S]*?)```/g;
+  let m;
+  while ((m = re.exec(src))) {
+    try { const j = JSON.parse(m[1].trim()); if (j && j.tool) out.push(j); } catch (e) {}
+  }
+  if (!out.length) {
+    // Модель иногда кладёт вызов в обычный json-блок — принимаем и такой вариант.
+    const anyFence = /```[a-zA-Z0-9_-]*\s*([\s\S]*?)```/g;
+    let f;
+    while ((f = anyFence.exec(src))) {
+      try {
+        const j = JSON.parse(f[1].trim());
+        if (j && j.tool) out.push(j);
+      } catch (e) {}
+    }
+  }
+  if (!out.length) {
+    for (const line of src.split('\n')) {
+      const t = line.trim();
+      if (!t.startsWith('{') || !t.endsWith('}')) continue;
+      try { const j = JSON.parse(t); if (j && j.tool) out.push(j); } catch (e) {}
+    }
+  }
+  return out.slice(0, 4);
+}
+
+function stripToolCalls(text) {
+  return String(text || '')
+    .replace(/```photonn-tool[\s\S]*?```/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function summarizeToolResult(call, res) {
+  if (res && res.skipped) return 'ОТКЛОНЕНО пользователем: действие НЕ выполнено, файл не изменён. Не утверждай, что оно выполнено.';
+  if (!res) return 'пусто';
+  const clamp = (s, n) => String(s == null ? '' : s).slice(0, n || 4000);
+  if (call.tool === 'list') {
+    const items = (res.entries || []).map((e) => (e.type === 'dir' ? e.name + '/' : e.name)).join('\n');
+    return items ? clamp(items, 4000) : '(пусто)';
+  }
+  if (call.tool === 'read') return clamp(res.content, 6000) + (res.truncated ? '\n…(файл обрезан)' : '');
+  if (call.tool === 'write') return 'записано ' + res.bytes + ' байт' + (res.backup ? ' · бэкап ' + res.backup : '');
+  if (call.tool === 'patch') return 'правка применена, ' + res.bytes + ' байт' + (res.backup ? ' · бэкап ' + res.backup : '');
+  if (call.tool === 'exec') return 'код ' + res.code + '\nstdout:\n' + clamp(res.stdout, 2500) + (res.stderr ? '\nstderr:\n' + clamp(res.stderr, 2500) : '');
+  return clamp(JSON.stringify(res), 3000);
+}
+
+function briefTool(call, res) {
+  if (call.tool === 'list') return (res.entries || []).length + ' объектов';
+  if (call.tool === 'read') return res.size + ' байт';
+  if (call.tool === 'write' || call.tool === 'patch') return res.bytes + ' байт' + (res.backup ? ' · бэкап' : '');
+  if (call.tool === 'exec') return 'код ' + res.code;
+  return 'готово';
+}
+
+function agentOp(call) {
+  const box = $('messages');
+  const card = el('div', 'agent-op run');
+  const head = el('div', 'agent-op-head');
+  head.append(el('span', 'agent-op-ico', AGENT_ICONS[call.tool] || '⚙'), el('b', '', String(call.tool || '')));
+  head.appendChild(el('code', '', call.path || call.cmd || '.'));
+  const detail = el('div', 'agent-op-detail', 'выполняю…');
+  card.append(head, detail);
+  box.appendChild(card);
+  box.scrollTop = box.scrollHeight;
+  return card;
+}
+
+function paintAgentOp(card, call, res, err) {
+  const detail = card.querySelector('.agent-op-detail');
+  if (err) { card.className = 'agent-op err'; detail.textContent = err; return; }
+  if (res && res.skipped) { card.className = 'agent-op skip'; detail.textContent = 'отклонено пользователем'; return; }
+  card.className = 'agent-op ok';
+  detail.textContent = briefTool(call, res);
+}
+
+function agentNote(text) {
+  const box = $('messages');
+  const n = el('div', 'agent-note', String(text).slice(0, 500));
+  box.appendChild(n);
+  box.scrollTop = box.scrollHeight;
+}
+
+function agentConfirm(call) {
+  return new Promise((resolve) => {
+    const back = $('agentConfirm');
+    const title = $('agentConfirmTitle');
+    const pathEl = $('agentConfirmPath');
+    const bodyEl = $('agentConfirmBody');
+    const allowAll = $('agentApproveAll');
+    const allow = $('agentAllow');
+    const deny = $('agentDeny');
+    if (!back || !title || !allow || !deny) return resolve(false);
+    const titles = { write: 'Записать файл', patch: 'Изменить файл', exec: 'Выполнить команду' };
+    title.textContent = titles[call.tool] || 'Действие агента';
+    pathEl.textContent = call.tool === 'exec'
+      ? (call.cwd ? call.cwd + ' › ' : '') + (call.cmd || '')
+      : (call.path || '.');
+    if (call.tool === 'write') {
+      bodyEl.textContent = String(call.content == null ? '' : call.content).slice(0, 1600) || '(пустой файл)';
+    } else if (call.tool === 'patch') {
+      bodyEl.textContent = '− ' + String(call.old || '').slice(0, 700) + '\n\n+ ' + String(call.new || '').slice(0, 700);
+    } else {
+      bodyEl.textContent = call.tool === 'exec' ? 'Выполнится в папке ' + (call.cwd || '.') : '';
+    }
+    allowAll.checked = false;
+    back.classList.remove('hidden');
+    allowAll.disabled = false;
+    const done = (ok) => {
+      back.classList.add('hidden');
+      allow.onclick = null;
+      deny.onclick = null;
+      if (ok && allowAll.checked) agent.autoApprove = true;
+      resolve(ok);
+    };
+    allow.onclick = () => done(true);
+    deny.onclick = () => done(false);
+  });
+}
+
+async function runAgentTool(call) {
+  const tool = String(call.tool || '');
+  if (!['list', 'read', 'write', 'patch', 'exec'].includes(tool)) throw new Error('неизвестный инструмент: ' + tool);
+  if (tool === 'exec' && !agent.allowExec) throw new Error('выполнение команд выключено в мосту (--allow-exec)');
+  if ((tool === 'write' || tool === 'patch' || tool === 'exec') && !agent.autoApprove) {
+    const ok = await agentConfirm(call);
+    if (!ok) return { skipped: true };
+  }
+  const args = { path: call.path, content: call.content, old: call.old, new: call.new, cmd: call.cmd, cwd: call.cwd };
+  const j = await agentBridge('/call', { tool, args });
+  return j.result || {};
+}
+
+async function revealAgentAnswer() {
+  if (!state.currentId) return;
+  try {
+    await fetch('/api/chats/' + encodeURIComponent(state.currentId) + '/reveal', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reveal: true })
+    });
+  } catch (e) {}
+}
+
+async function agentRun(text) {
+  if (!agent.connected) { openAgentModal(); toast('Сначала подключи мост агента'); return; }
+  agent.busy = true;
+  let results = '';
+  let finalSeen = false;
+  try {
+    for (let step = 0; step < AGENT_MAX_STEPS; step++) {
+      const prompt = step === 0 ? text : 'Результаты инструментов:\n' + results;
+      const msg = { role: 'assistant', content: '', reasoning: '' };
+      state.messages.push(msg);
+      const view = appendStreamingMessage(msg);
+      const out = await streamReply(view, prompt, { agent: true, hidden: step > 0, agentStep: step > 0 });
+      const calls = extractToolCalls(out);
+      if (!calls.length) { finalSeen = true; break; }
+      view.row.remove();
+      const at = state.messages.indexOf(msg);
+      if (at >= 0) state.messages.splice(at, 1);
+      const plan = stripToolCalls(out);
+      if (plan) agentNote(plan);
+      results = '';
+      for (let i = 0; i < calls.length; i++) {
+        const call = calls[i];
+        const card = agentOp(call);
+        let res = null;
+        let err = '';
+        try { res = await runAgentTool(call); } catch (e) { err = e.message || 'ошибка инструмента'; }
+        paintAgentOp(card, call, res, err);
+        results += '[' + (i + 1) + '] ' + call.tool + '(' + (call.path || call.cmd || '') + ')\n'
+          + (err ? 'ОШИБКА: ' + err : summarizeToolResult(call, res)) + '\n\n';
+      }
+    }
+    if (!finalSeen) toast('Агент остановился на ' + AGENT_MAX_STEPS + ' шагах — уточни задачу');
+  } finally {
+    agent.busy = false;
+    setStreamingUI(false);
+  }
+  if (finalSeen) await revealAgentAnswer();
+  await loadChats();
+  await refreshAccount();
 }
 
 // «Ещё раз»: заново генерируем ответ на последний вопрос, не дублируя его.
@@ -1136,9 +1458,13 @@ async function send() {
   const input = $('input');
   let text = input.value.trim();
   const attachedFile = state.pendingFile;
-  if ((!text && !state.pendingImage && !attachedFile) || state.streaming) return;
+  if ((!text && !state.pendingImage && !attachedFile) || state.streaming || agent.busy) return;
   if (state.banned) { showBan(state.banned); return; }
   if (!state.hasKey) { renderMessages(); toast('Сначала добавь API-ключ NVIDIA'); return; }
+  if (agent.on && !state.pendingImage && !attachedFile) {
+    if (!state.user) { $('authModal').classList.remove('hidden'); toast('Агент доступен после входа в аккаунт'); return; }
+    if (!agent.connected) { openAgentModal(); toast('Мост агента не подключён'); return; }
+  }
   if (!state.currentId) await newChat(true);
   if (state.pendingImage && !text) text = 'Проанализируй это фото.';
   if (state.pendingImage) text += '\n(приложено фото — проанализируй его)';
@@ -1160,6 +1486,15 @@ async function send() {
   setStageEmpty(false);
   box.appendChild(messageNode(userMsg));
   box.scrollTop = box.scrollHeight;
+
+  if (agent.on && agent.connected && !state.pendingImage && !attachedFile) {
+    try {
+      await agentRun(text);
+    } finally {
+      clearPendingImage();
+    }
+    return;
+  }
 
   const msg = { role: 'assistant', content: '', reasoning: '' };
   state.messages.push(msg);
@@ -1984,6 +2319,20 @@ on('mNew', () => newChat(false));
     if (state.user) document.body.classList.add('side-open');
     else $('authModal').classList.remove('hidden');
   });
+  on('btnAgent', () => {
+    if (!state.user) { $('authModal').classList.remove('hidden'); toast('Агент доступен после входа в аккаунт'); return; }
+    if (agent.connected) {
+      agent.on = !agent.on;
+      saveAgent();
+      applyAgentUI();
+      return;
+    }
+    openAgentModal();
+  });
+  on('agentClose', closeAgentModal);
+  on('agentSetup', openAgentModal);
+  on('agentOff', () => { agent.on = false; saveAgent(); applyAgentUI(); });
+  on('agentConnect', connectAgent);
   on('btnInstall', openInstall);
   on('installClose', () => $('installModal').classList.add('hidden'));
   on('installNow', installApp);
@@ -2030,10 +2379,15 @@ on('mNew', () => newChat(false));
   on('settingsReset', () => { Object.assign(ui, UI_DEFAULT); saveUi(); applyUi(); toast('Настройки сброшены'); });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
+    if (!$('agentConfirm').classList.contains('hidden')) {
+      const d = $('agentDeny');
+      if (d && d.onclick) d.onclick();
+    }
     closeSettings();
     closeTierMenu();
     closeAttachMenu();
     $('installModal').classList.add('hidden');
+    $('agentModal').classList.add('hidden');
     $('vipModal').classList.add('hidden');
     $('authModal').classList.add('hidden');
     document.body.classList.remove('side-open');
@@ -2050,6 +2404,8 @@ on('mNew', () => newChat(false));
 async function init() {
   applyUi();
   bind();
+  applyAgentUI();
+  autoConnectAgent();
   try {
     const st = await (await fetch('/api/state')).json();
     state.hasKey = st.hasKey;

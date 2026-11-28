@@ -10,7 +10,7 @@
 <link rel='apple-touch-icon' href='/icon-192.png'>
 <meta name='apple-mobile-web-app-capable' content='yes'>
 <meta name='apple-mobile-web-app-title' content='photonnAI'>
-<link rel='stylesheet' href='/style.css?v=25'>
+<link rel='stylesheet' href='/style.css?v=28'>
 <script>
   // Тему ставим до первой отрисовки, иначе при светлой теме экран мигает чёрным.
   try {
@@ -169,6 +169,42 @@
     </div>
   </div>
 
+  <div class='modal-back hidden' id='agentModal'>
+    <div class='modal agent-modal'>
+      <button class='modal-x' id='agentClose' title='Закрыть'>✕</button>
+      <div class='logo big'>🖥</div>
+      <h3>Агент на компьютере</h3>
+      <p class='modal-sub'>В этом режиме ИИ читает и правит файлы в выбранной папке. Доступ даёт маленький мост — он работает только на твоём компьютере и слушает 127.0.0.1.</p>
+      <ol class='agent-steps'>
+        <li>Скачай мост: <a id='agentDownload' href='/agent/photonn-agent.js' download='photonn-agent.js'>photonn-agent.js</a></li>
+        <li>Запусти в терминале, указав папку проекта:
+          <pre class='agent-cmd'>node photonn-agent.js --root C:\projects\my-app</pre>
+        </li>
+        <li>Скопируй токен из консоли и вставь сюда. Адрес моста — <code>http://127.0.0.1:8787</code>.</li>
+      </ol>
+      <label class='field-label' for='agentToken'>Токен из консоли</label>
+      <input class='field' id='agentToken' type='password' autocomplete='off' placeholder='32 символа'>
+      <label class='field-label' for='agentRoot'>Рабочая папка (необязательно)</label>
+      <input class='field' id='agentRoot' type='text' autocomplete='off' placeholder='C:\projects\my-app'>
+      <div class='agent-status' id='agentStatus'>Мост не подключён</div>
+      <button class='primary wide' id='agentConnect'>Подключиться</button>
+      <div class='vip-note'>Команды <code>exec</code> выключены по умолчанию — включить можно флагом <code>--allow-exec</code> при запуске моста. Каждая запись, правка и команда подтверждается в чате.</div>
+    </div>
+  </div>
+
+  <div class='modal-back hidden' id='agentConfirm'>
+    <div class='modal agent-modal'>
+      <h3 id='agentConfirmTitle'>Подтвердить действие</h3>
+      <div class='agent-confirm-path' id='agentConfirmPath'></div>
+      <pre class='agent-diff' id='agentConfirmBody'></pre>
+      <label class='agent-approve'><input type='checkbox' id='agentApproveAll'> Разрешить такие действия до конца чата</label>
+      <div class='agent-confirm-actions'>
+        <button class='ghost' id='agentDeny'>Отклонить</button>
+        <button class='primary' id='agentAllow'>Разрешить</button>
+      </div>
+    </div>
+  </div>
+
   <main class='main'>
     <header class='topbar'>
       <button class='tb-btn mobile-only' id='mMenu' title='История чатов' aria-label='История чатов'>
@@ -203,6 +239,12 @@
             <div class='preview-file-info'><b id='previewName'></b><small id='previewMeta'></small></div>
           </div>
           <button class='tool' id='imgRemove' title='Убрать вложение'>✕</button>
+        </div>
+        <div class='agent-strip hidden' id='agentStrip'>
+          <span class='agent-dot'></span>
+          <span class='agent-strip-text'>агент готов</span>
+          <button class='agent-strip-btn' id='agentSetup'>настроить</button>
+          <button class='agent-strip-btn' id='agentOff'>выключить</button>
         </div>
         <div class='composer-box'>
           <div class='attach-wrap'>
@@ -242,6 +284,7 @@
           <button class='chip' id='btnCamera' title='Сфотографировать и отправить'>📷 Камера</button>
           <button class='chip' id='btnWeb' title='Веб-поиск: модель найдёт свежие данные'>🌐 Веб-поиск</button>
           <button class='chip' id='btnDeep' title='Глубокое размышление: максимум рассуждений'>🧠 Размышления</button>
+          <button class='chip' id='btnAgent' title='Агент: доступ к файлам на компьютере'>🖥 Агент</button>
         </div>
         <div class='composer-hint'><button class='plan-meter' id='planMeter' type='button' title='Тариф и дневной лимит'>Free · 0 / 18</button><span class='hint-dot'>·</span>photonnAI может ошибаться. Проверяйте важные факты.</div>
       </div>
@@ -269,7 +312,7 @@
 (function () {
   if ('caches' in window) {
     caches.keys().then(function (ks) {
-      ks.forEach(function (k) { if (k.indexOf('photonn-v25') !== 0) caches.delete(k); });
+      ks.forEach(function (k) { if (k.indexOf('photonn-v28') !== 0) caches.delete(k); });
     }).catch(function () {});
   }
   if ('serviceWorker' in navigator) {
@@ -279,6 +322,6 @@
   }
 })();
 </script>
-<script src='/app.js?v=25'></script>
+<script src='/app.js?v=28'></script>
 </body>
 </html>

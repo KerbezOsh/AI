@@ -1104,6 +1104,7 @@ async function streamReply(view, text, opts) {
           // Сервер досочинил текст после потока — заменяем пузырь целиком.
           msg.content = j.final.content || '';
           msg.reasoning = j.final.reasoning || '';
+          if (Array.isArray(j.final.variants)) { msg.variants = j.final.variants; msg.variantIndex = j.final.variantIndex ?? msg.variants.length; }
           if (msg.content) view.setContent(msg.content);
           if (msg.reasoning) view.setReasoning(msg.reasoning);
           continue;
@@ -2352,8 +2353,7 @@ function renderChatList() {
           });
           if (!r.ok) throw new Error();
           c.title = value;
-          title.textContent = value;
-          input.replaceWith(title);
+          renderChatList();
           updateCrumb();
         } catch (err) {
           input.replaceWith(title);
@@ -2377,7 +2377,8 @@ function renderChatList() {
       await fetch('/api/chats/' + encodeURIComponent(c.id), { method: 'DELETE' });
       if (state.currentId === c.id) { state.currentId = null; state.messages = []; }
       await loadChats();
-      if (state.chats.length) await openChat(state.chats[0].id);
+      const nextChat = state.chats.find((x) => !x.archived) || state.chats[0];
+      if (nextChat) await openChat(nextChat.id);
       else renderMessages();
     };
 
@@ -2459,8 +2460,10 @@ function openPalette() {
   renderPalette('');
   setTimeout(() => p.input.focus(), 0);
 }
+let paletteSeq = 0;
 async function renderPalette(query) {
   const p = buildPalette();
+  const seq = ++paletteSeq;
   const q = String(query || '').trim().toLowerCase();
   p.list.innerHTML = '';
   const actions = [
@@ -2479,6 +2482,7 @@ async function renderPalette(query) {
       searchResults = Array.isArray(j.results) ? j.results.slice(0, 12) : [];
     } catch (e) {}
   }
+  if (seq !== paletteSeq) return;
   if (!actions.length && !chats.length && !searchResults.length) {
     p.list.appendChild(el('div', 'palette-empty', 'Ничего не найдено'));
     return;

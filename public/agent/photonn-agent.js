@@ -563,7 +563,10 @@ const server = http.createServer(async (req, res) => {
       const latest = sorted[sorted.length - 1];
       const backupPath = path.join(BACKUP_DIR, latest);
       const content = await fsp.readFile(backupPath, 'utf8');
-      const target = resolveInRoot(latest.replace(/^\d+-/, ''));
+      const sep = latest.indexOf('__');
+      if (sep < 0) return send(res, 200, { ok: false, error: 'не могу понять имя резервной копии: ' + latest });
+      const rel = latest.slice(sep + 2).split('__').join(path.sep);
+      const target = resolveInRoot(rel.replace(/\//g, path.sep));
       await fsp.mkdir(path.dirname(target), { recursive: true });
       await fsp.writeFile(target, content, 'utf8');
       await fsp.unlink(backupPath).catch(() => {});

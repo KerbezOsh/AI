@@ -760,6 +760,14 @@ body.is-streaming .send { box-shadow: 0 3px 18px rgba(123, 162, 255, 0.44); }
 .chat-tags { display: block; margin-top: 2px; font-size: 11px; color: var(--text-3); }
 .chat-item.pinned { border-color: var(--line); }
 
+.seg.wrap { flex-wrap: wrap; }
+.quick-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 2px; }
+.chip.quick { background: var(--surface-2); border: 1px solid var(--line); }
+.chip.quick:hover { background: var(--surface-3); border-color: var(--line-2); }
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.composer-box { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(12px); }
+.palette-item.active { background: var(--surface-3); color: var(--text); outline: 1px solid var(--line-2); }
+
 /* ---------- палитра Ctrl+K ---------- */
 .palette-back {
   position: fixed; inset: 0; z-index: 120; display: grid; place-items: start center;

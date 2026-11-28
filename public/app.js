@@ -42,7 +42,7 @@ const PLANS_FALLBACK = {
 
 // Настройки интерфейса живут на устройстве: тема, размер текста, поведение.
 const UI_KEY = 'photonn.ui';
-const UI_DEFAULT = { theme: 'dark', size: 'md', enterSend: true, modelTag: true, compact: false, deep: false };
+const UI_DEFAULT = { theme: 'dark', size: 'md', enterSend: true, modelTag: true, compact: false, deep: false, answerStyle: 'normal' };
 const ui = Object.assign({}, UI_DEFAULT, (() => {
   try { return JSON.parse(localStorage.getItem(UI_KEY) || '{}'); } catch (e) { return {}; }
 })());
@@ -69,6 +69,8 @@ function renderSettingsState() {
   if (theme) theme.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.theme === ui.theme));
   const size = $('segSize');
   if (size) size.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.size === (ui.size || 'md')));
+  const style = $('segStyle');
+  if (style) style.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.style === (ui.answerStyle || 'normal')));
   if ($('optEnter')) $('optEnter').checked = Boolean(ui.enterSend);
   if ($('optModelTag')) $('optModelTag').checked = Boolean(ui.modelTag);
   if ($('optCompact')) $('optCompact').checked = Boolean(ui.compact);
@@ -193,6 +195,28 @@ function codeBlockHtml(code, lang) {
 
 function bindCodeCopy(root) {
   if (!root) return;
+  root.querySelectorAll('.code-block').forEach((block) => {
+    if (block.querySelector('.code-download')) return;
+    const dl = document.createElement('button');
+    dl.className = 'code-copy code-download';
+    dl.textContent = 'Скачать';
+    dl.type = 'button';
+    dl.addEventListener('click', () => {
+      const code = block.querySelector('code');
+      if (!code) return;
+      const blob = new Blob([code.textContent], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'code.txt';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+    const head = block.querySelector('.code-head');
+    if (head) head.appendChild(dl);
+  });
   root.querySelectorAll('.code-copy').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.preventDefault();
@@ -1045,6 +1069,7 @@ async function streamReply(view, text, opts) {
         web: opts && opts.agent ? false : state.webSearch,
         deep: state.deepMode,
         regen: Boolean(opts && opts.regen),
+        style: ui.answerStyle || 'normal',
         agent: Boolean(opts && opts.agent),
         agentStep: Boolean(opts && opts.agentStep),
         hidden: Boolean(opts && opts.hidden),
@@ -2119,6 +2144,14 @@ function initTools() {
     else $('cameraInput').click();
   });
   $('btnCamera').addEventListener('click', () => $('cameraInput').click());
+  document.querySelectorAll('#quickChips .quick').forEach((b) => {
+    b.addEventListener('click', () => {
+      const input = $('input');
+      input.value = b.dataset.prompt;
+      resizeInput();
+      input.focus();
+    });
+  });
 
   // Голосовой ввод: там, где Web Speech API нет, работает понятная демо-подстановка.
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -2438,14 +2471,21 @@ function buildPalette() {
   box.append(input, list);
   back.appendChild(box);
   document.body.appendChild(back);
-  palette = { back, input, list };
+  palette = { back, input, list, activeIndex: 0 };
   back.addEventListener('click', (e) => { if (e.target === back) closePalette(); });
   input.addEventListener('input', () => renderPalette(input.value));
   input.addEventListener('keydown', (e) => {
+    const items = [...list.querySelectorAll('.palette-item')];
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      palette.activeIndex = Math.min(Math.max(palette.activeIndex + (e.key === 'ArrowDown' ? 1 : -1), 0), Math.max(0, items.length - 1));
+      items.forEach((it, i) => it.classList.toggle('active', i === palette.activeIndex));
+      if (items[palette.activeIndex]) items[palette.activeIndex].scrollIntoView({ block: 'nearest' });
+    }
     if (e.key === 'Escape') closePalette();
     if (e.key === 'Enter') {
-      const first = list.querySelector('.palette-item');
-      if (first) first.click();
+      const target = items[palette.activeIndex] || list.querySelector('.palette-item');
+      if (target) target.click();
     }
   });
   return palette;
@@ -2483,6 +2523,7 @@ async function renderPalette(query) {
     } catch (e) {}
   }
   if (seq !== paletteSeq) return;
+  p.activeIndex = 0;
   if (!actions.length && !chats.length && !searchResults.length) {
     p.list.appendChild(el('div', 'palette-empty', 'Ничего не найдено'));
     return;
@@ -2764,6 +2805,12 @@ on('mNew', () => newChat(false));
     const b = e.target.closest('button[data-size]');
     if (!b) return;
     ui.size = b.dataset.size;
+    saveUi(); applyUi();
+  });
+  tap('segStyle', 'click', (e) => {
+    const b = e.target.closest('button[data-style]');
+    if (!b) return;
+    ui.answerStyle = b.dataset.style;
     saveUi(); applyUi();
   });
   tap('optEnter', 'change', (e) => { ui.enterSend = e.target.checked; saveUi(); });

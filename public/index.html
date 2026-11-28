@@ -10,7 +10,7 @@
 <link rel='apple-touch-icon' href='/icon-192.png'>
 <meta name='apple-mobile-web-app-capable' content='yes'>
 <meta name='apple-mobile-web-app-title' content='photonnAI'>
-<link rel='stylesheet' href='/style.css?v=34'>
+<link rel='stylesheet' href='/style.css?v=35'>
 <script>
   // Тему ставим до первой отрисовки, иначе при светлой теме экран мигает чёрным.
   try {
@@ -133,6 +133,17 @@
           <button data-size='sm'>Мелкий</button>
           <button data-size='md'>Обычный</button>
           <button data-size='lg'>Крупный</button>
+        </div>
+      </div>
+
+      <div class='settings-group'>
+        <div class='settings-label'>Стиль ответа</div>
+        <div class='seg wrap' id='segStyle'>
+          <button data-style='normal'>Обычный</button>
+          <button data-style='brief'>Коротко</button>
+          <button data-style='detailed'>Подробно</button>
+          <button data-style='beginner'>Для новичка</button>
+          <button data-style='expert'>Как эксперт</button>
         </div>
       </div>
 
@@ -292,6 +303,13 @@
           </button>
           <button class='stop' id='stop' hidden title='Остановить'>■</button>
         </div>
+        <div class='quick-chips' id='quickChips'>
+          <button class='chip quick' data-prompt='Объясни проще: '>Объясни проще</button>
+          <button class='chip quick' data-prompt='Дай конкретный пример: '>Дай пример</button>
+          <button class='chip quick' data-prompt='Разбери по шагам: '>По шагам</button>
+          <button class='chip quick' data-prompt='Краткий итог: '>Итог</button>
+          <button class='chip quick' data-prompt='Какие бывают ошибки и как их избежать? '>Ошибки</button>
+        </div>
         <div class='composer-extras'>
           <button class='chip' id='btnCamera' title='Сфотографировать и отправить'>📷 Камера</button>
           <button class='chip' id='btnWeb' title='Веб-поиск: модель найдёт свежие данные'>🌐 Веб-поиск</button>
@@ -324,7 +342,7 @@
 (function () {
   if ('caches' in window) {
     caches.keys().then(function (ks) {
-      ks.forEach(function (k) { if (k.indexOf('photonn-v34') !== 0) caches.delete(k); });
+      ks.forEach(function (k) { if (k.indexOf('photonn-v35') !== 0) caches.delete(k); });
     }).catch(function () {});
   }
   if ('serviceWorker' in navigator) {
@@ -334,6 +352,6 @@
   }
 })();
 </script>
-<script src='/app.js?v=34'></script>
+<script src='/app.js?v=35'></script>
 </body>
 </html>

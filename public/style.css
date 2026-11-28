@@ -1276,3 +1276,26 @@ body.ads-off .app { height: 100dvh; }
   .agent-modal { width: 100%; }
 }
 
+
+/* Conversation branches, image settings and persistent composer drafts. */
+.msg-actions { flex-wrap: wrap; }
+.user-actions { justify-content: flex-end; }
+.message-editor { margin-top: 12px; min-width: min(420px, 70vw); }
+.message-editor textarea { width: 100%; resize: vertical; min-height: 110px; line-height: 1.5; }
+.edit-controls { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin-top: 8px; }
+.branch-parent { margin-right: 14px; white-space: nowrap; }
+.image-settings { font-size: 12px; color: var(--text-3); margin: 8px auto 0; width: fit-content; max-width: 100%; }
+.image-settings > summary { cursor: pointer; text-align: center; padding: 4px; }
+.image-settings-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 8px 0; }
+.image-settings label { display: flex; align-items: center; gap: 8px; }
+.image-settings select, .image-settings input { color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: 7px 8px; font: inherit; }
+.image-settings input { width: 112px; }
+.draft-status { text-align: center; color: var(--text-3); font-size: 11px; }
+.draft-status:not(:empty) { margin-top: 6px; }
+.image-tools { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; margin: 4px 0 10px; }
+.image-details { color: var(--text-3); font-size: 12px; max-width: 100%; }
+.image-details summary { cursor: pointer; padding: 2px 0; }
+.image-details pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; color: var(--text-2); max-width: 450px; }
+.msg-img { max-height: 72vh; object-fit: contain; object-position: left; width: auto; max-width: min(100%, 520px); }
+.msg.user .message-editor { max-width: 100%; }
+@media (max-width: 640px) { .message-editor { min-width: 0; width: 100%; } .image-settings-row { justify-content: center; } .image-tools { gap: 10px; } }

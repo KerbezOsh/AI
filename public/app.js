@@ -18,7 +18,10 @@ const state = {
   banned: null,
   isAdmin: false,
   booted: false,
-  pendingFile: null
+  pendingFile: null,
+  startingSend: false,
+  navigationBusy: false,
+  currentChat: null
 };
 // Агент: мост на компьютере пользователя (public/agent/photonn-agent.js).
 // Токен и папка лежат в localStorage — без токена мост не отвечает.
@@ -825,6 +828,7 @@ function messageNode(msg, question) {
       if (next) { const rest = chain.filter((u) => u !== next); msg.imageChain = rest; img.src = next; }
     };
     bubble.appendChild(img);
+    if (msg.role === 'assistant') addImageTools(bubble, msg);
   } else if (msg.image) bubble.appendChild(el('div', 'msg-attach', '📷 фото приложено'));
   if (msg.file && msg.file.name) bubble.appendChild(el('div', 'msg-attach', '📄 ' + msg.file.name));
   if (msg.search) bubble.appendChild(el('div', 'msg-attach', '🌐 поиск: ' + msg.search));
@@ -839,6 +843,7 @@ function messageNode(msg, question) {
   }
 
   if (msg.role === 'assistant' && (parsed.content || msg.image)) addActions(bubble, displayMsg, question);
+  if (msg.role === 'user' && msg.content) addUserEditAction(bubble, msg);
 
   row.appendChild(bubble);
   return row;
@@ -897,6 +902,12 @@ function updateCrumb() {
   if (!box) return;
   const chat = state.chats.find((c) => c.id === state.currentId);
   box.textContent = chat ? chat.title : 'Новый чат';
+  const parentId = state.currentChat && state.currentChat.branchOf;
+  if (parentId && state.chats.some((item) => item.id === parentId)) {
+    const back = el('button', 'mini branch-parent', uiLang === 'en' ? '← Original chat' : '← Исходный чат');
+    back.onclick = () => openChat(parentId);
+    box.prepend(back);
+  }
 }
 
 function renderMessages() {
@@ -1066,6 +1077,10 @@ async function streamReply(view, text, opts) {
   const controller = new AbortController();
   state.controller = controller;
   const msg = view.msg;
+  const replyChatId = state.currentId;
+  view.accepted = false;
+  view.failed = false;
+  view.cancelled = false;
 
   try {
     const mode = MODES[currentMode()] || MODES.pro;
@@ -1073,11 +1088,11 @@ async function streamReply(view, text, opts) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        chatId: state.currentId,
+        chatId: replyChatId,
         text,
         tier: mode.tier,
         temperature: state.settings.temperature,
-        image: state.pendingImage,
+        image: opts && Object.prototype.hasOwnProperty.call(opts, 'image') ? opts.image : null,
         file: opts && opts.file ? opts.file : undefined,
         web: opts && opts.agent ? false : state.webSearch,
         deep: state.deepMode,
@@ -1105,6 +1120,7 @@ async function streamReply(view, text, opts) {
       throw new Error(message);
     }
 
+    view.accepted = true;
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
@@ -1165,16 +1181,19 @@ async function streamReply(view, text, opts) {
     if (tail.content) { msg.content += tail.content; view.setContent(msg.content); }
   } catch (e) {
     if (e.name === 'AbortError') {
+      view.cancelled = true;
       msg.content += (msg.content ? '\n\n' : '') + '_Остановлено._';
       view.setContent(msg.content);
     } else {
+      view.failed = true;
+      view.errorMessage = e.message || 'Не удалось получить ответ';
       view.fail(e.message || 'Не удалось получить ответ');
       msg.content = '';
       const at = state.messages.indexOf(msg);
       if (at >= 0) state.messages.splice(at, 1);
     }
   } finally {
-    state.controller = null;
+    if (state.controller === controller) state.controller = null;
     // Если поток закрылся без единого символа ответа — показываем понятную подсказку.
     if (!msg.content.trim() && state.messages.indexOf(msg) >= 0) {
       msg.content = '_Модель не вернула текст ответа. Нажми «Ещё раз» или выбери другой режим._';
@@ -1658,78 +1677,80 @@ async function agentRun(text) {
 
 // «Ещё раз»: заново генерируем ответ на последний вопрос, не дублируя его.
 async function retryLast() {
-  if (state.streaming) return;
+  if (state.streaming || state.startingSend || state.navigationBusy || agent.busy) return;
   const lastUser = [...state.messages].reverse().find((m) => m.role === 'user');
   if (!lastUser) { toast('Нет вопроса, на который отвечать'); return; }
-  if (state.messages.length && state.messages[state.messages.length - 1].role === 'assistant') state.messages.pop();
-  renderMessages();
-  if (wantsImage(lastUser.content) && !lastUser.image) {
-    await autoImage(lastUser.content, { reuse: true });
+  const previous = state.messages.at(-1).role === 'assistant' ? state.messages.at(-1) : null;
+  if (wantsImage(lastUser.content) && !lastUser.image && !lastUser.file) {
+    const p = previous && (previous.imageParams || previous);
+    await autoImage(lastUser.content, { reuse: true, imageOptions: { aspect: (p && p.aspect) || 'square' } });
     return;
   }
+  if (lastUser.image && typeof lastUser.image !== 'string') { toast('Для повтора анализа прикрепи исходное фото заново. Прежний ответ сохранён.'); return; }
   const msg = { role: 'assistant', content: '', reasoning: '' };
   state.messages.push(msg);
   const view = appendStreamingMessage(msg);
-  await streamReply(view, lastUser.content, { regen: true });
-  loadChats();
+  await streamReply(view, lastUser.content, { regen: true, image: typeof lastUser.image === 'string' ? lastUser.image : null, file: lastUser.file && lastUser.file.content ? lastUser.file : undefined });
+  if (view.failed || view.cancelled) {
+    toast(view.cancelled ? 'Повтор остановлен. Прежний ответ сохранён.' : (view.errorMessage || 'Не удалось повторить ответ') + '. Прежний ответ сохранён.');
+    const at = state.messages.indexOf(msg);
+    if (at >= 0) state.messages.splice(at, 1);
+  } else if (previous) {
+    const at = state.messages.indexOf(previous);
+    if (at >= 0) state.messages.splice(at, 1);
+  }
+  renderMessages();
 }
 
 async function send() {
+  if (state.streaming || state.startingSend || state.navigationBusy || agent.busy) return;
   const input = $('input');
-  let text = input.value.trim();
-  const attachedFile = state.pendingFile;
-  if ((!text && !state.pendingImage && !attachedFile) || state.streaming || agent.busy) return;
+  const snapshot = composerSnapshot();
+  const attachedFile = snapshot.pendingFile;
+  const attachedImage = snapshot.pendingImage;
+  let text = snapshot.text.trim();
+  if (!text && !attachedImage && !attachedFile) return;
   if (state.banned) { showBan(state.banned); return; }
-  if (!state.hasKey) { renderMessages(); toast('Сначала добавь API-ключ NVIDIA'); return; }
-  if (agent.on && !state.pendingImage && !attachedFile) {
+  const makingImage = wantsImage(text) && !attachedImage && !attachedFile && !agent.on;
+  if (!state.hasKey && !makingImage) { renderMessages(); toast('Сначала добавь API-ключ NVIDIA'); return; }
+  if (agent.on && !attachedImage && !attachedFile) {
     if (!state.user) { $('authModal').classList.remove('hidden'); toast('Агент доступен после входа в аккаунт'); return; }
     if (!agent.connected) { openAgentModal(); toast('Мост агента не подключён'); return; }
   }
-  if (!state.currentId) await newChat(true);
-  if (state.pendingImage && !text) text = 'Проанализируй это фото.';
-  if (state.pendingImage) text += '\n(приложено фото — проанализируй его)';
-  if (attachedFile && !text) text = 'Проанализируй приложенный файл.';
-
-  input.value = '';
-  resizeInput();
-
-  const userMsg = {
-    role: 'user',
-    content: text.trim(),
-    image: Boolean(state.pendingImage),
-    file: attachedFile ? { name: attachedFile.name, type: attachedFile.type } : undefined
-  };
-  state.messages.push(userMsg);
-  const box = $('messages');
-  const welcome = box.querySelector('.welcome');
-  if (welcome) welcome.remove();
-  setStageEmpty(false);
-  box.appendChild(messageNode(userMsg));
-  box.scrollTop = box.scrollHeight;
-
-  if (agent.on && agent.connected && !state.pendingImage && !attachedFile) {
-    try {
-      await agentRun(text);
-    } finally {
-      clearPendingImage();
-    }
-    return;
-  }
-
-  // «Нарисуй…», «сгенерируй картинку…» — сразу генерируем, без отдельной кнопки.
-  if (wantsImage(userMsg.content) && !userMsg.image && !attachedFile) {
-    await autoImage(userMsg.content);
-    return;
-  }
-
-  const msg = { role: 'assistant', content: '', reasoning: '' };
-  state.messages.push(msg);
-  const view = appendStreamingMessage(msg);
+  let imageOptions;
+  try { if (makingImage) imageOptions = readImageOptions(); } catch (e) { toast(e.message); return; }
+  state.startingSend = true;
+  $('send').disabled = true;
+  lockComposerNavigation(true);
   try {
-    await streamReply(view, userMsg.content, { file: attachedFile || undefined });
-  } finally {
-    clearPendingImage();
-  }
+    if (!state.currentId && !(await newChat(true))) return;
+    if (attachedImage && !text) text = 'Проанализируй это фото.';
+    if (attachedFile && !text) text = 'Проанализируй приложенный файл.';
+    clearSentComposer();
+    lockComposerNavigation(false);
+    const userMsg = { role: 'user', content: text, image: Boolean(attachedImage), file: attachedFile ? { name: attachedFile.name, type: attachedFile.type } : undefined };
+    state.messages.push(userMsg);
+    const box = $('messages');
+    const welcome = box.querySelector('.welcome');
+    if (welcome) welcome.remove();
+    setStageEmpty(false);
+    box.appendChild(messageNode(userMsg));
+    box.scrollTop = box.scrollHeight;
+    if (agent.on && agent.connected && !attachedImage && !attachedFile) { await agentRun(text); return; }
+    if (makingImage) { await autoImage(text, { imageOptions }); return; }
+    const msg = { role: 'assistant', content: '', reasoning: '' };
+    state.messages.push(msg);
+    const view = appendStreamingMessage(msg);
+    await streamReply(view, text, { image: attachedImage, file: attachedFile || undefined });
+    if (!view.accepted) {
+      if (view.errorMessage) toast(view.errorMessage);
+      const at = state.messages.indexOf(userMsg);
+      if (at >= 0) state.messages.splice(at, 1);
+      restoreFailedComposer(snapshot);
+      renderMessages();
+    }
+  } catch (e) { restoreFailedComposer(snapshot); toast(e.message || 'Не удалось отправить запрос'); }
+  finally { state.startingSend = false; $('send').disabled = false; lockComposerNavigation(false); }
 }
 
 let pendingImageData = null;
@@ -1761,6 +1782,7 @@ function setPendingImage(dataUrl) {
   state.pendingImage = dataUrl || null;
   if (dataUrl) state.pendingFile = null;
   renderAttachment();
+  scheduleComposerDraft();
 }
 
 function setPendingFile(file) {
@@ -1770,6 +1792,7 @@ function setPendingFile(file) {
     pendingImageData = null;
   }
   renderAttachment();
+  scheduleComposerDraft();
 }
 
 function clearPendingImage() {
@@ -1778,6 +1801,7 @@ function clearPendingImage() {
   pendingImageData = null;
   renderAttachment();
   ['fileInput', 'cameraInput', 'anyFileInput'].forEach((id) => { if ($(id)) $(id).value = ''; });
+  scheduleComposerDraft();
 }
 
 function setToggle(id, key, title) {
@@ -1870,6 +1894,15 @@ async function refreshAccount() {
     state.settings = j.settings || state.settings;
     state.plans = j.plans || state.plans;
     state.user = j.user || null;
+    if (composerContext && composerContext.scope !== composerScope()) {
+      await saveComposerDraft();
+      state.currentId = null;
+      state.currentChat = null;
+      state.messages = [];
+      await activateComposer(null, false);
+      await loadChats();
+      renderMessages();
+    }
     state.plan = j.plan || null;
     state.usage = j.usage || null;
     state.isAdmin = Boolean(j.isAdmin);
@@ -1957,6 +1990,8 @@ function renderAuth() {
 }
 
 async function logoutUser() {
+  if (!(await saveComposerDraft())) { toast('Сохрани или сократи черновик перед выходом'); return; }
+  if (window.PhotonnDrafts) await window.PhotonnDrafts.flush();
   try { await fetch('/api/logout', { method: 'POST' }); } catch (e) {}
   // Если открыта админ-сессия, выходим и из неё: иначе гость остаётся с правами админа.
   if (state.isAdmin) {
@@ -2221,8 +2256,14 @@ function initTools() {
     if (!f) return;
     if (!/^image\//.test(f.type)) { toast('Выбери изображение PNG, JPEG или WebP'); $(inp).value = ''; return; }
     if (f.size > 6 * 1024 * 1024) { toast('Фото больше 6 МБ — выбери поменьше'); $(inp).value = ''; return; }
+    const attachedTo = state.currentId;
+    const restoreToken = composerRestore;
     const r = new FileReader();
-    r.onload = () => setPendingImage(String(r.result));
+    r.onload = () => {
+      if (state.currentId !== attachedTo || composerRestore !== restoreToken) { toast('Чат переключён: выбери фото снова'); return; }
+      setPendingImage(String(r.result));
+    };
+    r.onerror = () => toast('Не удалось прочитать фото');
     r.readAsDataURL(f);
     $(inp).value = '';
   };
@@ -2239,8 +2280,11 @@ function initTools() {
       inp.value = '';
       return;
     }
+    const attachedTo = state.currentId;
+    const restoreToken = composerRestore;
     const r = new FileReader();
     r.onload = () => {
+      if (state.currentId !== attachedTo || composerRestore !== restoreToken) { toast('Чат переключён: выбери файл снова'); return; }
       const content = String(r.result || '');
       if (!content.trim()) { toast('Файл пустой'); return; }
       setPendingFile({ name: f.name, size: f.size, type: f.type || 'text/plain', content: content.slice(0, 200000) });
@@ -2284,46 +2328,51 @@ function openInstall() {
 try { initTools(); } catch (e) { console.warn('initTools:', e); }
 
 async function newChat(silent) {
-  if (agent.busy) { toast('Агент ещё работает — дождись ответа'); return null; }
+  if (agent.busy || state.streaming || state.navigationBusy || (state.startingSend && !silent)) { toast('Дождись ответа или нажми «Остановить»'); return null; }
+  state.navigationBusy = true;
+  lockComposerNavigation(true);
   cancelAgentConfirm();
   agent.autoApprove = false;
   try {
+    if (!(await saveComposerDraft())) throw new Error('Не удалось сохранить черновик. Скопируй текст или сократи вложение перед переходом.');
+    const oldContext = composerContext && { ...composerContext };
     const r = await fetch('/api/chats', { method: 'POST' });
     const j = await r.json();
-    if (!r.ok || !j.chat) {
-      if (j && j.banned) showBan(j.ban);
-      toast((j && j.error) || 'Не удалось создать чат');
-      return null;
-    }
+    if (!r.ok || !j.chat) { if (j.banned) showBan(j.ban); throw new Error(j.error || 'Не удалось создать чат'); }
     state.currentId = j.chat.id;
+    state.currentChat = j.chat;
     state.messages = [];
+    const moved = await activateComposer(j.chat.id, Boolean(silent));
+    if (silent && moved === false) throw new Error('Черновик сохранён в исходном чате. Повтори отправку.');
+    if (silent && oldContext && oldContext.chatId === '__new__' && window.PhotonnDrafts) await window.PhotonnDrafts.remove(oldContext.chatId, oldContext.scope);
     await loadChats();
     if (!silent) renderMessages();
     $('input').focus();
     return j.chat.id;
-  } catch (e) { toast('Нет связи с сервером'); return null; }
+  } catch (e) { toast(e.message || 'Нет связи с сервером'); return null; }
+  finally { state.navigationBusy = false; lockComposerNavigation(false); }
 }
 
 async function openChat(id) {
-  if (agent.busy) { toast('Агент ещё работает — дождись ответа'); return; }
+  if (agent.busy || state.streaming || state.startingSend || state.navigationBusy) { toast('Дождись ответа или нажми «Остановить»'); return false; }
+  state.navigationBusy = true;
+  lockComposerNavigation(true);
   cancelAgentConfirm();
   agent.autoApprove = false;
-  const r = await fetch('/api/chats/' + id);
-  if (!r.ok) {
-    const j = await r.json().catch(() => null);
-    if (j && j.banned) showBan(j.ban);
-    return;
-  }
-  const j = await r.json();
-  state.currentId = id;
-  state.messages = j.chat.messages || [];
-  // Режим выбирает пользователь, а не история: переключение чата не должно
-  // незаметно менять Flash/Pro. Ограничения тарифа проверяет updatePlanUI().
-  updatePlanUI();
-  renderTierSelect();
-  renderMessages();
-  renderChatList();
-  document.body.classList.remove('side-open');
+  try {
+    if (!(await saveComposerDraft())) throw new Error('Не удалось сохранить черновик. Скопируй текст или сократи вложение перед переходом.');
+    const r = await fetch('/api/chats/' + encodeURIComponent(id));
+    const j = await r.json();
+    if (!r.ok || !j.chat) { if (j.banned) showBan(j.ban); throw new Error(j.error || 'Не удалось открыть чат'); }
+    state.currentId = id;
+    state.currentChat = j.chat;
+    state.messages = j.chat.messages || [];
+    await activateComposer(id, false);
+    updatePlanUI(); renderTierSelect(); renderMessages(); renderChatList();
+    document.body.classList.remove('side-open');
+    return true;
+  } catch (e) { toast(e.message || 'Нет связи с сервером'); return false; }
+  finally { state.navigationBusy = false; lockComposerNavigation(false); }
 }
 
 async function loadChats() {
@@ -2480,8 +2529,10 @@ function wantsImage(text) {
   return has(IMAGE_MAKE) && has(IMAGE_NOUN);
 }
 
-async function fetchImageObject(url) {
+async function fetchImageObject(url, signal) {
   const ctrl = new AbortController();
+  const abort = () => ctrl.abort();
+  if (signal) { if (signal.aborted) ctrl.abort(); else signal.addEventListener('abort', abort, { once: true }); }
   const timer = setTimeout(() => ctrl.abort(), 60000);
   try {
     const r = await fetch(url, { cache: 'no-store', signal: ctrl.signal });
@@ -2490,36 +2541,34 @@ async function fetchImageObject(url) {
     if (!/^image\/(?:jpeg|png|webp)$/.test(type)) return { obj: '', retry: 0, status: r.status };
     const blob = await r.blob();
     if (blob.size < 2000 || blob.size > 4 * 1024 * 1024) return { obj: '', retry: 0, status: r.status };
-    // Показываем и сохраняем одни и те же байты: URL генератора при повторном
-    // открытии может вернуть другой результат или упереться в лимит.
     const dataUrl = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
       reader.onerror = () => reject(new Error('Could not read image'));
       reader.readAsDataURL(blob);
     });
+    if (signal && signal.aborted) throw new DOMException('Aborted', 'AbortError');
     return { obj: dataUrl, retry: 0, status: r.status };
-  } catch (e) {
-    return { obj: '', retry: 0, status: 0 };
-  } finally {
-    clearTimeout(timer);
-  }
+  } catch (e) { if (signal && signal.aborted) throw e; return { obj: '', retry: 0, status: 0 }; }
+  finally { clearTimeout(timer); if (signal) signal.removeEventListener('abort', abort); }
 }
 
-async function renderViaServer(url) {
+async function renderViaServer(url, signal) {
   try {
-    const r = await fetch('/api/image/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+    const r = await fetch('/api/image/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }), signal });
     const j = await r.json();
     if (r.ok && j.ok && j.dataUrl) return { dataUrl: j.dataUrl, retry: 0 };
     return { dataUrl: '', retry: Number(j.retry) || 0 };
-  } catch (e) {
-    return { dataUrl: '', retry: 0 };
-  }
+  } catch (e) { if (signal && signal.aborted) throw e; return { dataUrl: '', retry: 0 }; }
 }
 
 async function autoImage(prompt, opts) {
   const o = opts || {};
   const chatId = state.currentId;
+  const previous = o.reuse && state.messages.at(-1) && state.messages.at(-1).role === 'assistant' ? state.messages.at(-1) : null;
+  const controller = new AbortController();
+  state.controller = controller;
+  const signal = controller.signal;
   const box = $('messages');
   const note = el('div', 'msg-row assistant');
   const bubble = el('div', 'bubble');
@@ -2528,68 +2577,54 @@ async function autoImage(prompt, opts) {
   if (box) { box.appendChild(note); box.scrollTop = box.scrollHeight; }
   setStreamingUI(true);
   try {
-    const r = await fetch('/api/image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) });
+    const options = o.imageOptions || readImageOptions();
+    const r = await fetch('/api/image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt, ...options }), signal });
     const j = await r.json();
-    if (!r.ok || !Array.isArray(j.urls) || !j.urls.length) throw new Error(j.error || 'image');
+    if (!r.ok || !Array.isArray(j.urls) || !j.urls.length) throw new Error(j.error || 'Не удалось подготовить картинку');
     let shown = '';
-    let chosen = '';
-    let chain = [];
     const noteText = note.querySelector('.content');
     const setNote = (t) => { if (noteText) noteText.textContent = t; };
-    // 1) Pollinations напрямую — обычно мгновенно, без ключа и без сервера.
-    const first = await fetchImageObject(j.urls[0]);
-    if (first.obj) { shown = first.obj; chosen = first.obj; chain = []; }
-    let waitSec = 0;
-    // 2) Браузер не видит 402 из-за CORS — тогда генерирует сервер: у него
-    //    отдельный IP и свой бесплатный слот.
+    const first = await fetchImageObject(j.urls[0], signal);
+    if (first.obj) shown = first.obj;
     if (!shown) {
-      const prox = await renderViaServer(j.urls[0]);
-      if (prox.dataUrl) { shown = prox.dataUrl; chosen = prox.dataUrl; chain = []; }
-      else waitSec = prox.retry;
-    }
-    // 3) Все слоты заняты — ждём точное время из Retry-After и пробуем сервер ещё раз.
-    if (!shown && waitSec > 0 && waitSec <= 60) {
-      for (let left = waitSec; left > 0; left--) {
-        setNote((uiLang === 'en' ? 'Free limit: ' : 'Бесплатный лимит: ') + left + (uiLang === 'en' ? ' s…' : ' с…'));
-        await new Promise((res) => setTimeout(res, 1000));
-      }
-      setNote(uiLang === 'en' ? 'Drawing…' : 'Рисую…');
-      const prox = await renderViaServer(j.urls[0]);
-      if (prox.dataUrl) { shown = prox.dataUrl; chosen = prox.dataUrl; chain = []; }
-      else if (prox.retry > 0 && prox.retry <= 8) {
-        for (let left = prox.retry; left > 0; left--) {
+      let prox = await renderViaServer(j.urls[0], signal);
+      if (prox.dataUrl) shown = prox.dataUrl;
+      for (let attempt = 0; !shown && attempt < 2 && prox.retry > 0 && prox.retry <= 60; attempt++) {
+        for (let left = Math.ceil(prox.retry); left > 0; left--) {
           setNote((uiLang === 'en' ? 'Free limit: ' : 'Бесплатный лимит: ') + left + (uiLang === 'en' ? ' s…' : ' с…'));
-          await new Promise((res) => setTimeout(res, 1000));
+          await abortableDelay(1000, signal);
         }
-        const again = await renderViaServer(j.urls[0]);
-        if (again.dataUrl) { shown = again.dataUrl; chosen = again.dataUrl; chain = []; }
+        setNote(uiLang === 'en' ? 'Drawing…' : 'Рисую…');
+        prox = await renderViaServer(j.urls[0], signal);
+        if (prox.dataUrl) shown = prox.dataUrl;
       }
     }
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
     if (!shown) throw new Error(uiLang === 'en' ? 'the image generator is unavailable, try again in a minute' : 'генератор картинок недоступен, попробуй через минуту');
     const caption = uiLang === 'en' ? 'Here is your picture.' : 'Картинка готова.';
-    state.messages.push({ role: 'assistant', content: caption, image: shown, imageChain: chain, model: 'pollinations' });
-    renderMessages();
-    try {
-      const sr = await fetch('/api/chats/' + encodeURIComponent(chatId), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ appendImage: { prompt, url: chosen, chain, caption, reuse: Boolean(o.reuse) } })
-      });
-      if (!sr.ok) throw new Error('save');
-      loadChats().catch(() => {});
-    } catch (e) {
-      toast(uiLang === 'en' ? 'Picture shown, but not saved in history' : 'Картинка есть, но не сохранилась в истории');
-    }
-  } catch (e) {
-    const last = state.messages[state.messages.length - 1];
-    if (!o.reuse && last && last.role === 'user' && last.content === prompt) {
-      state.messages.pop();
-      const input = $('input');
-      if (input) { input.value = prompt; resizeInput(); }
+    const imageParams = { prompt, effectivePrompt: j.effectivePrompt || prompt, seed: j.seed, width: j.width, height: j.height, aspect: j.aspect || options.aspect || 'square' };
+    // Save before replacing a previous answer: failure or cancellation keeps it intact.
+    const sr = await fetch('/api/chats/' + encodeURIComponent(chatId), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appendImage: { prompt, url: shown, chain: [], caption, reuse: Boolean(o.reuse), ...imageParams } }) });
+    if (!sr.ok) { const error = await sr.json().catch(() => ({})); throw new Error(error.error || 'Картинка создана, но не удалось сохранить её в истории. Повтори запрос.'); }
+    if (state.currentId === chatId) {
+      const msg = { role: 'assistant', content: caption, image: shown, imageChain: [], model: 'pollinations', imageParams, ...imageParams };
+      if (previous && state.messages.includes(previous)) state.messages.splice(state.messages.indexOf(previous), 1, msg);
+      else state.messages.push(msg);
       renderMessages();
     }
-    toast((uiLang === 'en' ? 'Could not draw: ' : 'Не получилось нарисовать: ') + (e.message || ''));
+    loadChats().catch(() => {});
+  } catch (e) {
+    if (state.currentId === chatId && !o.reuse) {
+      const last = state.messages.at(-1);
+      if (last && last.role === 'user' && last.content === prompt) {
+        state.messages.pop();
+        restoreFailedComposer({ text: prompt });
+        renderMessages();
+      }
+    }
+    toast(signal.aborted ? (uiLang === 'en' ? 'Image generation stopped' : 'Генерация картинки остановлена') : (uiLang === 'en' ? 'Could not draw: ' : 'Не получилось нарисовать: ') + (e.message || ''));
   } finally {
+    if (state.controller === controller) state.controller = null;
     setStreamingUI(false);
     if (note.parentNode) note.remove();
   }
@@ -2666,6 +2701,7 @@ async function renderPalette(query) {
     { name: 'Новый чат', hint: 'действие', run: () => newChat(false) },
     { name: 'Открыть настройки', hint: 'действие', run: () => openSettings() },
     { name: 'Экспорт чатов', hint: 'действие', run: () => exportChats() },
+    { name: 'Импорт чатов', hint: 'действие', run: () => $('importChatsInput').click() },
     { name: 'Открыть историю', hint: 'действие', run: () => document.body.classList.add('side-open') }
   ].filter((a) => !q || a.name.toLowerCase().includes(q));
   const chats = state.chats
@@ -2751,6 +2787,7 @@ function resizeInput() {
   const input = $('input');
   input.style.height = 'auto';
   input.style.height = Math.min(input.scrollHeight, 180) + 'px';
+  scheduleComposerDraft();
 }
 
 function lastUserText() {
@@ -2761,7 +2798,7 @@ function lastUserText() {
 }
 
 function addActions(bubble, msg, question) {
-  if (!msg.content) return;
+  if (!msg.content && !msg.image) return;
   const actions = el('div', 'msg-actions');
   const copy = el('button', 'mini', 'Копировать');
   copy.onclick = () => { navigator.clipboard.writeText(msg.content); toast('Скопировано'); };
@@ -2863,6 +2900,7 @@ async function saveInlineKey(input, status, button) {
 function bind() {
   const on = (id, fn) => { const n = $(id); if (n) n.onclick = fn; };
   const tap = (id, ev, fn) => { const n = $(id); if (n) n.addEventListener(ev, fn); };
+  initWorkspaceTools();
   on('newChat', () => newChat(false));
   on('send', send);
   on('stop', () => { if (state.controller) state.controller.abort(); });
@@ -3049,8 +3087,9 @@ async function init() {
     renderTierSelect();
     if (state.banned) { renderMessages(); return; }
     await loadChats();
-    if (state.chats.length) await openChat(state.chats[0].id);
-    else renderMessages();
+    const remembered = lastOpenedChat();
+    if (state.chats.length) await openChat(state.chats.some((chat) => chat.id === remembered) ? remembered : state.chats[0].id);
+    else { renderMessages(); await activateComposer(null, false); }
   } catch (e) {
     toast('Сервер не отвечает: ' + e.message);
     renderMessages();

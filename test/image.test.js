@@ -119,7 +119,7 @@ test('image history: persists and reloads the same large data URL without genera
 
 test('browser generation: displayed bytes are saved instead of a generator URL', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../public/app.js'), 'utf8');
-  const start = source.indexOf('async function fetchImageObject(url) {');
+  const start = source.indexOf('async function fetchImageObject(url, signal) {');
   const end = source.indexOf('async function exportChats()', start);
   const bytes = Buffer.alloc(4096, 42);
   const expected = 'data:image/jpeg;base64,' + bytes.toString('base64');
@@ -127,7 +127,7 @@ test('browser generation: displayed bytes are saved instead of a generator URL',
   const state = { currentId: 'image-test', messages: [{ role: 'user', content: fields }] };
   const node = () => ({ appendChild() {}, querySelector() { return { textContent: '' }; }, remove() {}, parentNode: null });
   const sandbox = {
-    module: { exports: {} }, state, uiLang: 'ru', AbortController, setTimeout, clearTimeout,
+    module: { exports: {} }, state, uiLang: 'ru', AbortController, DOMException, setTimeout, clearTimeout, readImageOptions: () => ({aspect:'square'}),
     FileReader: class {
       readAsDataURL(blob) { blob.arrayBuffer().then((b) => { this.result = 'data:' + blob.type + ';base64,' + Buffer.from(b).toString('base64'); this.onload(); }); }
     },

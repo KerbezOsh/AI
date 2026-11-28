@@ -28,7 +28,7 @@
 <link rel='apple-touch-icon' href='/icon-192.png'>
 <meta name='apple-mobile-web-app-capable' content='yes'>
 <meta name='apple-mobile-web-app-title' content='photonnAI'>
-<link rel='stylesheet' href='/style.css?v=45'>
+<link rel='stylesheet' href='/style.css?v=47'>
 <script>
   // Тему ставим до первой отрисовки, иначе при светлой теме экран мигает чёрным.
   try {
@@ -74,6 +74,8 @@
     <div class='sidebar-foot'>
       <button class='side-settings' id='sideSettings'><span class='ico'>⚙</span> <span data-i18n='settings'>Настройки</span></button>
       <button class='side-settings' id='exportChats'><span class='ico'>⇩</span> <span data-i18n='export'>Экспорт чатов</span></button>
+      <button class='side-settings' id='importChats' type='button'><span class='ico'>⇧</span> <span>Импорт чатов</span></button>
+      <input type='file' id='importChatsInput' accept='.json,application/json' hidden>
       <a class='side-settings discord-link' href='https://discord.gg/ffqbEcWG7' target='_blank' rel='noopener'><span class='ico'>◉</span> Discord-канал</a>
       <button class='side-settings' id='langBtn'><span class='ico'>🌐</span> <span id='langLabel'>EN</span></button>
       <div class='offer-banner hidden' id='offerBanner'><span class='ico'>🎁</span><span id='offerText'></span><button class='mini' id='offerOpen' type='button'>Открыть</button></div>
@@ -303,7 +305,7 @@
           <input type='file' id='fileInput' accept='image/png,image/jpeg,image/webp' hidden>
           <input type='file' id='anyFileInput' accept='.txt,.md,.markdown,.csv,.json,.js,.ts,.css,.html,.py,.java,.sql,.log,.xml,.yml,.yaml,text/plain,text/markdown,application/json' hidden>
           <input type='file' id='cameraInput' accept='image/*' capture='environment' hidden>
-          <textarea id='input' rows='1' placeholder='Спросить photonnAI' data-i18n-ph='ask'></textarea>
+          <textarea id='input' rows='1' maxlength='200000' placeholder='Спросить photonnAI' data-i18n-ph='ask'></textarea>
           <div class='tier-wrap'>
             <button class='tier-btn' id='tierBtn' aria-haspopup='true' aria-expanded='false' title='Модель: Pro, Flash или Reasoning'>
               <span id='tierLabel'>Pro</span>
@@ -330,6 +332,14 @@
           <button class='chip quick' data-prompt='Краткий итог: ' data-i18n='q4'>Итог</button>
           <button class='chip quick' data-prompt='Какие бывают ошибки и как их избежать? ' data-i18n='q5'>Ошибки</button>
         </div>
+        <details class='image-settings' id='imageSettings'>
+          <summary>Параметры картинки</summary>
+          <div class='image-settings-row'>
+            <label>Формат <select id='imageAspect'><option value='square'>1:1 — квадрат</option><option value='landscape'>16:9 — альбом</option><option value='portrait'>9:16 — портрет</option></select></label>
+            <label>Seed <input id='imageSeed' type='text' inputmode='numeric' maxlength='6' placeholder='Случайный' aria-label='Seed картинки от 0 до 999999'></label>
+          </div>
+        </details>
+        <div class='draft-status' id='draftStatus' role='status' aria-live='polite'></div>
         <div class='composer-extras'>
           <button class='chip' id='btnCamera' title='Сфотографировать и отправить'>📷 <span data-i18n='camera'>Камера</span></button>
           <button class='chip' id='btnWeb' title='Веб-поиск: модель найдёт свежие данные'>🌐 <span data-i18n='web'>Веб-поиск</span></button>
@@ -373,6 +383,8 @@
   }
 })();
 </script>
-<script src='/app.js?v=46'></script>
+<script src='/drafts.js?v=47'></script>
+<script src='/workspace.js?v=47'></script>
+<script src='/app.js?v=47'></script>
 </body>
 </html>

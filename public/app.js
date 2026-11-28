@@ -813,7 +813,7 @@ function messageNode(msg, question) {
     bubble.appendChild(det);
   }
 
-  if (msg.image && typeof msg.image === 'string' && (msg.image.startsWith('data:image') || msg.image.startsWith('http'))) {
+  if (msg.image && typeof msg.image === 'string' && (msg.image.startsWith('data:image') || msg.image.startsWith('http') || msg.image.startsWith('blob:'))) {
     const img = document.createElement('img');
     img.className = 'msg-img';
     img.src = msg.image;
@@ -834,11 +834,11 @@ function messageNode(msg, question) {
   bindCodeCopy(content);
   bubble.appendChild(content);
 
-  if (msg.role === 'assistant' && parsed.content) {
+  if (msg.role === 'assistant' && parsed.content && !msg.image) {
     bubble.appendChild(el('div', 'model-tag', tierLabel(displayMsg.tier || 'pro') + (msg.fallback ? ' · резерв' : '')));
   }
 
-  if (msg.role === 'assistant' && parsed.content) addActions(bubble, displayMsg, question);
+  if (msg.role === 'assistant' && (parsed.content || msg.image)) addActions(bubble, displayMsg, question);
 
   row.appendChild(bubble);
   return row;
@@ -1663,6 +1663,10 @@ async function retryLast() {
   if (!lastUser) { toast('Нет вопроса, на который отвечать'); return; }
   if (state.messages.length && state.messages[state.messages.length - 1].role === 'assistant') state.messages.pop();
   renderMessages();
+  if (wantsImage(lastUser.content) && !lastUser.image) {
+    await autoImage(lastUser.content, { reuse: true });
+    return;
+  }
   const msg = { role: 'assistant', content: '', reasoning: '' };
   state.messages.push(msg);
   const view = appendStreamingMessage(msg);
@@ -1709,6 +1713,12 @@ async function send() {
     } finally {
       clearPendingImage();
     }
+    return;
+  }
+
+  // «Нарисуй…», «сгенерируй картинку…» — сразу генерируем, без отдельной кнопки.
+  if (wantsImage(userMsg.content) && !userMsg.image && !attachedFile) {
+    await autoImage(userMsg.content);
     return;
   }
 
@@ -2452,35 +2462,124 @@ function renderChatList() {
   }
 }
 
-async function generateImage() {
-  const input = $('input');
-  const prompt = String(input.value || '').trim();
-  if (!prompt) { input.focus(); toast(uiLang === 'en' ? 'Describe the picture first' : 'Сначала опиши картинку'); return; }
-  input.value = '';
-  resizeInput();
-  toast(uiLang === 'en' ? 'Generating…' : 'Генерирую картинку…');
-  // Сначала Puter.js (без ключа, платит пользователь), затем резервная цепочка.
-  if (window.puter && window.puter.ai && window.puter.ai.txt2img) {
-    try {
-      const imgEl = await window.puter.ai.txt2img(prompt, { model: 'openai/gpt-image-2.6-flare', quality: 'low' });
-      const src = imgEl && (imgEl.src || imgEl.getAttribute && imgEl.getAttribute('src'));
-      if (src) {
-        state.messages.push({ role: 'user', content: '🎨 ' + prompt, image: src });
-        renderMessages();
-        toast(uiLang === 'en' ? 'Done' : 'Готово');
-        return;
-      }
-    } catch (e) {}
+// Картинки генерируются сами: приложение распознаёт просьбу в тексте,
+// создаёт изображение и сохраняет его. Ни кнопок, ни ключей, ни входа не нужно.
+const IMAGE_DRAW = ['нарисуй', 'нарисуйте', 'изобрази', 'изобразите', 'draw', 'paint', 'sketch'];
+const IMAGE_MAKE = ['сгенерируй', 'сгенерируйте', 'создай', 'создайте', 'сделай', 'сделайте', 'generate', 'create', 'make', 'render', 'illustrate'];
+const IMAGE_NOUN = ['картинк', 'изображени', 'рисунок', 'фото', 'арт', 'постер', 'аватар', 'обои', 'иллюстрац', 'image', 'picture', 'photo', 'poster', 'avatar', 'wallpaper', 'illustration', 'drawing'];
+function wantsImage(text) {
+  const s = String(text || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!s) return false;
+  const words = s.split(/[^a-zа-яё0-9]+/).filter(Boolean);
+  if (!words.length) return false;
+  const has = (list) => words.some((w) => list.some((stem) => w.indexOf(stem) === 0));
+  // «Как нарисовать…» — это инструкция, а не заказ картинки.
+  if (['как', 'how', 'что', 'what', 'почему', 'why', 'где', 'where', 'is', 'are'].indexOf(words[0]) >= 0) return false;
+  if (has(IMAGE_DRAW)) return true;
+  if (/(image|picture|photo|drawing|illustration)\s+of\b/.test(s)) return true;
+  return has(IMAGE_MAKE) && has(IMAGE_NOUN);
+}
+
+async function fetchImageObject(url) {
+  let r;
+  try { r = await fetch(url, { cache: 'no-store' }); } catch (e) { return { obj: '', retry: 0, status: 0 }; }
+  if (r.ok) {
+    const type = r.headers.get('content-type') || '';
+    if (type.indexOf('image/') !== 0) return { obj: '', retry: 0, status: r.status };
+    const blob = await r.blob();
+    if (blob.size < 2000) return { obj: '', retry: 0, status: r.status };
+    return { obj: URL.createObjectURL(blob), retry: 0, status: r.status };
   }
+  // Pollinations отдаёт 402 и точное время, когда освободится бесплатный слот.
+  return { obj: '', retry: Number(r.headers.get('Retry-After')) || 0, status: r.status };
+}
+
+async function renderViaServer(url) {
+  try {
+    const r = await fetch('/api/image/render', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+    const j = await r.json();
+    if (r.ok && j.ok && j.dataUrl) return { dataUrl: j.dataUrl, retry: 0 };
+    return { dataUrl: '', retry: Number(j.retry) || 0 };
+  } catch (e) {
+    return { dataUrl: '', retry: 0 };
+  }
+}
+
+async function autoImage(prompt, opts) {
+  const o = opts || {};
+  const chatId = state.currentId;
+  const box = $('messages');
+  const note = el('div', 'msg-row assistant');
+  const bubble = el('div', 'bubble');
+  bubble.appendChild(el('div', 'content', uiLang === 'en' ? 'Drawing…' : 'Рисую…'));
+  note.appendChild(bubble);
+  if (box) { box.appendChild(note); box.scrollTop = box.scrollHeight; }
+  setStreamingUI(true);
   try {
     const r = await fetch('/api/image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) });
     const j = await r.json();
-    if (!r.ok || !j.url) throw new Error(j.error || 'failed');
-    state.messages.push({ role: 'user', content: '🎨 ' + prompt, image: j.url, imageChain: [j.fallbackUrl, j.stockUrl, j.picsumUrl].filter(Boolean) });
+    if (!r.ok || !Array.isArray(j.urls) || !j.urls.length) throw new Error(j.error || 'image');
+    let shown = '';
+    let chosen = '';
+    let chain = [];
+    const noteText = note.querySelector('.content');
+    const setNote = (t) => { if (noteText) noteText.textContent = t; };
+    // 1) Pollinations напрямую — обычно мгновенно, без ключа и без сервера.
+    const first = await fetchImageObject(j.urls[0]);
+    if (first.obj) { shown = first.obj; chosen = j.urls[0]; chain = j.urls.slice(1); }
+    let waitSec = 0;
+    // 2) Браузер не видит 402 из-за CORS — тогда генерирует сервер: у него
+    //    отдельный IP и свой бесплатный слот.
+    if (!shown) {
+      const prox = await renderViaServer(j.urls[0]);
+      if (prox.dataUrl) { shown = prox.dataUrl; chosen = prox.dataUrl; chain = j.urls.slice(1); }
+      else waitSec = prox.retry;
+    }
+    // 3) Все слоты заняты — ждём точное время из Retry-After и пробуем сервер ещё раз.
+    if (!shown && waitSec > 0 && waitSec <= 60) {
+      for (let left = waitSec; left > 0; left--) {
+        setNote((uiLang === 'en' ? 'Free limit: ' : 'Бесплатный лимит: ') + left + (uiLang === 'en' ? ' s…' : ' с…'));
+        await new Promise((res) => setTimeout(res, 1000));
+      }
+      setNote(uiLang === 'en' ? 'Drawing…' : 'Рисую…');
+      const prox = await renderViaServer(j.urls[0]);
+      if (prox.dataUrl) { shown = prox.dataUrl; chosen = prox.dataUrl; chain = j.urls.slice(1); }
+      else if (prox.retry > 0 && prox.retry <= 8) {
+        for (let left = prox.retry; left > 0; left--) {
+          setNote((uiLang === 'en' ? 'Free limit: ' : 'Бесплатный лимит: ') + left + (uiLang === 'en' ? ' s…' : ' с…'));
+          await new Promise((res) => setTimeout(res, 1000));
+        }
+        const again = await renderViaServer(j.urls[0]);
+        if (again.dataUrl) { shown = again.dataUrl; chosen = again.dataUrl; chain = j.urls.slice(1); }
+      }
+    }
+    if (!shown) throw new Error(uiLang === 'en' ? 'both free services are busy, try again in a minute' : 'бесплатные сервисы заняты, попробуй через минуту');
+    const caption = uiLang === 'en' ? 'Here is your picture.' : 'Картинка готова.';
+    state.messages.push({ role: 'assistant', content: caption, image: shown, imageChain: chain, model: 'pollinations' });
     renderMessages();
-    toast(uiLang === 'en' ? 'Done' : 'Готово');
+    try {
+      const sr = await fetch('/api/chats/' + encodeURIComponent(chatId), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appendImage: { prompt, url: chosen, chain, caption, reuse: Boolean(o.reuse) } })
+      });
+      if (!sr.ok) throw new Error('save');
+      loadChats().catch(() => {});
+    } catch (e) {
+      toast(uiLang === 'en' ? 'Picture shown, but not saved in history' : 'Картинка есть, но не сохранилась в истории');
+    }
   } catch (e) {
-    toast('Не получилось: ' + e.message);
+    const last = state.messages[state.messages.length - 1];
+    if (!o.reuse && last && last.role === 'user' && last.content === prompt) {
+      state.messages.pop();
+      const input = $('input');
+      if (input) { input.value = prompt; resizeInput(); }
+      renderMessages();
+    }
+    toast((uiLang === 'en' ? 'Could not draw: ' : 'Не получилось нарисовать: ') + (e.message || ''));
+  } finally {
+    setStreamingUI(false);
+    if (note.parentNode) note.remove();
   }
 }
 
@@ -2837,7 +2936,6 @@ on('mNew', () => newChat(false));
   on('btnSettings', openSettings);
   on('sideSettings', openSettings);
   on('exportChats', exportChats);
-  on('btnImage', generateImage);
   on('langBtn', async () => {
     uiLang = uiLang === 'ru' ? 'en' : 'ru';
     try { localStorage.setItem('photonn.lang', uiLang); } catch (e) {}
@@ -2952,8 +3050,8 @@ init();
 
 // ── Язык интерфейса ───────────────────────────────────────────────
 const I18N = {
-  ru: { newChat: 'Новый чат', history: 'История', settings: 'Настройки', export: 'Экспорт чатов', ask: 'Спросить photonnAI', settingsTitle: 'Настройки', settingsSub: 'Сохраняются на этом устройстве', theme: 'Тема', dark: 'Тёмная', light: 'Светлая', system: 'Как в системе', fontSize: 'Размер текста', sm: 'Мелкий', md: 'Обычный', lg: 'Крупный', ansStyle: 'Стиль ответа', normal: 'Обычный', brief: 'Коротко', detailed: 'Подробно', beginner: 'Для новичка', expert: 'Как эксперт', behavior: 'Поведение', reset: 'Сбросить', done: 'Готово', q1: 'Объясни проще', q2: 'Дай пример', q3: 'По шагам', q4: 'Итог', q5: 'Ошибки', camera: 'Камера', web: 'Веб-поиск', deep: 'Размышления', agent: 'Агент', image: 'Картинка', welcome: 'С чего начнём?', w1: 'Написать текст', w2: 'Разобрать задачу', w3: 'Объяснить код', w4: 'Сравнить и решить' },
-  en: { newChat: 'New chat', history: 'History', settings: 'Settings', export: 'Export chats', ask: 'Ask photonnAI', settingsTitle: 'Settings', settingsSub: 'Stored on this device', theme: 'Theme', dark: 'Dark', light: 'Light', system: 'As system', fontSize: 'Text size', sm: 'Small', md: 'Normal', lg: 'Large', ansStyle: 'Answer style', normal: 'Normal', brief: 'Brief', detailed: 'Detailed', beginner: 'Beginner', expert: 'Expert', behavior: 'Behavior', reset: 'Reset', done: 'Done', q1: 'Simplify', q2: 'Give example', q3: 'Step by step', q4: 'Summary', q5: 'Pitfalls', camera: 'Camera', web: 'Web search', deep: 'Thinking', agent: 'Agent', image: 'Picture', welcome: 'What shall we start with?', w1: 'Write text', w2: 'Break down task', w3: 'Explain code', w4: 'Compare & decide' }
+  ru: { newChat: 'Новый чат', history: 'История', settings: 'Настройки', export: 'Экспорт чатов', ask: 'Спросить photonnAI или «нарисуй …»', settingsTitle: 'Настройки', settingsSub: 'Сохраняются на этом устройстве', theme: 'Тема', dark: 'Тёмная', light: 'Светлая', system: 'Как в системе', fontSize: 'Размер текста', sm: 'Мелкий', md: 'Обычный', lg: 'Крупный', ansStyle: 'Стиль ответа', normal: 'Обычный', brief: 'Коротко', detailed: 'Подробно', beginner: 'Для новичка', expert: 'Как эксперт', behavior: 'Поведение', reset: 'Сбросить', done: 'Готово', q1: 'Объясни проще', q2: 'Дай пример', q3: 'По шагам', q4: 'Итог', q5: 'Ошибки', camera: 'Камера', web: 'Веб-поиск', deep: 'Размышления', agent: 'Агент', image: 'Картинка', welcome: 'С чего начнём?', w1: 'Написать текст', w2: 'Разобрать задачу', w3: 'Объяснить код', w4: 'Сравнить и решить' },
+  en: { newChat: 'New chat', history: 'History', settings: 'Settings', export: 'Export chats', ask: 'Ask photonnAI or “draw …”', settingsTitle: 'Settings', settingsSub: 'Stored on this device', theme: 'Theme', dark: 'Dark', light: 'Light', system: 'As system', fontSize: 'Text size', sm: 'Small', md: 'Normal', lg: 'Large', ansStyle: 'Answer style', normal: 'Normal', brief: 'Brief', detailed: 'Detailed', beginner: 'Beginner', expert: 'Expert', behavior: 'Behavior', reset: 'Reset', done: 'Done', q1: 'Simplify', q2: 'Give example', q3: 'Step by step', q4: 'Summary', q5: 'Pitfalls', camera: 'Camera', web: 'Web search', deep: 'Thinking', agent: 'Agent', image: 'Picture', welcome: 'What shall we start with?', w1: 'Write text', w2: 'Break down task', w3: 'Explain code', w4: 'Compare & decide' }
 };
 let uiLang = 'ru';
 function applyLang() {

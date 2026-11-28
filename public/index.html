@@ -28,7 +28,7 @@
 <link rel='apple-touch-icon' href='/icon-192.png'>
 <meta name='apple-mobile-web-app-capable' content='yes'>
 <meta name='apple-mobile-web-app-title' content='photonnAI'>
-<link rel='stylesheet' href='/style.css?v=43'>
+<link rel='stylesheet' href='/style.css?v=45'>
 <script>
   // Тему ставим до первой отрисовки, иначе при светлой теме экран мигает чёрным.
   try {
@@ -334,7 +334,6 @@
           <button class='chip' id='btnCamera' title='Сфотографировать и отправить'>📷 <span data-i18n='camera'>Камера</span></button>
           <button class='chip' id='btnWeb' title='Веб-поиск: модель найдёт свежие данные'>🌐 <span data-i18n='web'>Веб-поиск</span></button>
           <button class='chip' id='btnDeep' title='Глубокое размышление: максимум рассуждений'>🧠 <span data-i18n='deep'>Размышления</span></button>
-          <button class='chip' id='btnImage' title='Сгенерировать картинку (бесплатно, Flux)'>🎨 <span data-i18n='image'>Картинка</span></button>
           <button class='chip' id='btnAgent' title='Агент: доступ к файлам на компьютере'>🖥 <span data-i18n='agent'>Агент</span></button>
         </div>
         <div class='composer-hint'><button class='plan-meter' id='planMeter' type='button' title='Тариф и дневной лимит'>Free · 0 / 18</button><span class='hint-dot'>·</span>photonnAI может ошибаться. Проверяйте важные факты.</div>
@@ -364,7 +363,7 @@
 (function () {
   if ('caches' in window) {
     caches.keys().then(function (ks) {
-      ks.forEach(function (k) { if (k.indexOf('photonn-v43') !== 0) caches.delete(k); });
+      ks.forEach(function (k) { if (k.indexOf('photonn-v45') !== 0) caches.delete(k); });
     }).catch(function () {});
   }
   if ('serviceWorker' in navigator) {
@@ -374,7 +373,6 @@
   }
 })();
 </script>
-<script src='https://js.puter.com/v2/'></script>
-<script src='/app.js?v=43'></script>
+<script src='/app.js?v=45'></script>
 </body>
 </html>

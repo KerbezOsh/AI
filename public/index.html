@@ -10,7 +10,7 @@
 <link rel='apple-touch-icon' href='/icon-192.png'>
 <meta name='apple-mobile-web-app-capable' content='yes'>
 <meta name='apple-mobile-web-app-title' content='photonnAI'>
-<link rel='stylesheet' href='/style.css?v=35'>
+<link rel='stylesheet' href='/style.css?v=36'>
 <script>
   // Тему ставим до первой отрисовки, иначе при светлой теме экран мигает чёрным.
   try {
@@ -50,13 +50,15 @@
       </div>
       <button class='rail-btn drawer-close' id='drawerClose' title='Закрыть' aria-label='Закрыть'>✕</button>
     </div>
-    <button class='new-chat' id='newChat'>Новый чат</button>
-    <div class='list-label'>История</div>
+    <button class='new-chat' id='newChat' data-i18n='newChat'>Новый чат</button>
+    <div class='list-label' data-i18n='history'>История</div>
     <div class='chat-list' id='chatList'></div>
     <div class='sidebar-foot'>
-      <button class='side-settings' id='sideSettings'><span class='ico'>⚙</span> Настройки</button>
-      <button class='side-settings' id='exportChats'><span class='ico'>⇩</span> Экспорт чатов</button>
+      <button class='side-settings' id='sideSettings'><span class='ico'>⚙</span> <span data-i18n='settings'>Настройки</span></button>
+      <button class='side-settings' id='exportChats'><span class='ico'>⇩</span> <span data-i18n='export'>Экспорт чатов</span></button>
       <a class='side-settings discord-link' href='https://discord.gg/ffqbEcWG7' target='_blank' rel='noopener'><span class='ico'>◉</span> Discord-канал</a>
+      <button class='side-settings' id='langBtn'><span class='ico'>🌐</span> <span id='langLabel'>EN</span></button>
+      <div class='offer-banner hidden' id='offerBanner'><span class='ico'>🎁</span><span id='offerText'></span><button class='mini' id='offerOpen' type='button'>Открыть</button></div>
       <div class='key-state' id='learnState'>Оценок: 0 · фактов: 0</div>
     </div>
     <div class='side-auth' id='sideAuth'></div>
@@ -283,7 +285,7 @@
           <input type='file' id='fileInput' accept='image/png,image/jpeg,image/webp' hidden>
           <input type='file' id='anyFileInput' accept='.txt,.md,.markdown,.csv,.json,.js,.ts,.css,.html,.py,.java,.sql,.log,.xml,.yml,.yaml,text/plain,text/markdown,application/json' hidden>
           <input type='file' id='cameraInput' accept='image/*' capture='environment' hidden>
-          <textarea id='input' rows='1' placeholder='Спросить photonnAI'></textarea>
+          <textarea id='input' rows='1' placeholder='Спросить photonnAI' data-i18n-ph='ask'></textarea>
           <div class='tier-wrap'>
             <button class='tier-btn' id='tierBtn' aria-haspopup='true' aria-expanded='false' title='Модель: Pro, Flash или Reasoning'>
               <span id='tierLabel'>Pro</span>
@@ -342,7 +344,7 @@
 (function () {
   if ('caches' in window) {
     caches.keys().then(function (ks) {
-      ks.forEach(function (k) { if (k.indexOf('photonn-v35') !== 0) caches.delete(k); });
+      ks.forEach(function (k) { if (k.indexOf('photonn-v36') !== 0) caches.delete(k); });
     }).catch(function () {});
   }
   if ('serviceWorker' in navigator) {
@@ -352,6 +354,6 @@
   }
 })();
 </script>
-<script src='/app.js?v=35'></script>
+<script src='/app.js?v=36'></script>
 </body>
 </html>

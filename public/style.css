@@ -768,6 +768,9 @@ body.is-streaming .send { box-shadow: 0 3px 18px rgba(123, 162, 255, 0.44); }
 .composer-box { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(12px); }
 .palette-item.active { background: var(--surface-3); color: var(--text); outline: 1px solid var(--line-2); }
 
+.offer-banner { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 9px 10px; border-radius: var(--r-lg); background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 18%, transparent), var(--accent)); border: 1px solid var(--line); font-size: 13px; color: var(--text); }
+.offer-banner .mini { margin-left: auto; }
+
 /* ---------- палитра Ctrl+K ---------- */
 .palette-back {
   position: fixed; inset: 0; z-index: 120; display: grid; place-items: start center;

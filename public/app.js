@@ -2792,6 +2792,13 @@ on('mNew', () => newChat(false));
   on('btnSettings', openSettings);
   on('sideSettings', openSettings);
   on('exportChats', exportChats);
+  on('langBtn', async () => {
+    uiLang = uiLang === 'ru' ? 'en' : 'ru';
+    try { localStorage.setItem('photonn.lang', uiLang); } catch (e) {}
+    applyLang();
+    loadOffers();
+  });
+  on('offerOpen', () => openVip());
   on('settingsClose', closeSettings);
   on('settingsDone', closeSettings);
   tap('settingsModal', 'click', (e) => { if (e.target.id === 'settingsModal') closeSettings(); });
@@ -2875,6 +2882,9 @@ async function init() {
       state.deepMode = true;
     }
     applyTierModels(st);
+    uiLang = await detectLang(st.engine && st.engine.geo && st.engine.geo.country);
+    applyLang();
+    loadOffers();
     updateLearnState();
     state.booted = true;
     updatePlanUI();
@@ -2893,6 +2903,52 @@ async function init() {
 }
 
 init();
+
+// ── Язык интерфейса ───────────────────────────────────────────────
+const I18N = {
+  ru: { newChat: 'Новый чат', history: 'История', settings: 'Настройки', export: 'Экспорт чатов', ask: 'Спросить photonnAI' },
+  en: { newChat: 'New chat', history: 'History', settings: 'Settings', export: 'Export chats', ask: 'Ask photonnAI' }
+};
+let uiLang = 'ru';
+function applyLang() {
+  const dict = I18N[uiLang] || I18N.ru;
+  document.documentElement.lang = uiLang;
+  document.querySelectorAll('[data-i18n]').forEach((n) => { const k = n.dataset.i18n; if (dict[k]) n.textContent = dict[k]; });
+  document.querySelectorAll('[data-i18n-ph]').forEach((n) => { const k = n.dataset.i18nPh; if (dict[k]) n.placeholder = dict[k]; });
+  const lbl = $('langLabel');
+  if (lbl) lbl.textContent = uiLang === 'ru' ? 'EN' : 'RU';
+}
+async function detectLang(geoCountry) {
+  try {
+    const saved = localStorage.getItem('photonn.lang');
+    if (saved === 'ru' || saved === 'en') return saved;
+    const RU_COUNTRIES = ['RU', 'BY', 'KZ', 'UA', 'RS', 'ME', 'KG', 'KZ'];
+    if (geoCountry && RU_COUNTRIES.includes(geoCountry)) return 'ru';
+    if (geoCountry && geoCountry !== 'XX' && geoCountry.length === 2) return 'en';
+    const nav = (navigator.language || '').toLowerCase();
+    if (nav.startsWith('ru')) return 'ru';
+    if (nav.startsWith('en')) return 'en';
+    try {
+      const r = await fetch('https://ipapi.co/json/');
+      const j = await r.json();
+      const c = String(j.country_code || '').toUpperCase();
+      if (RU_COUNTRIES.includes(c)) return 'ru';
+      if (c) return 'en';
+    } catch (e) {}
+    return 'ru';
+  } catch (e) { return 'ru'; }
+}
+async function loadOffers() {
+  try {
+    const j = await (await fetch('/api/offers')).json();
+    const box = $('offerBanner');
+    if (box && j && Array.isArray(j.offers) && j.offers.length) {
+      const o = j.offers[0];
+      box.classList.remove('hidden');
+      $('offerText').textContent = (uiLang === 'en' ? 'Special offer: ' : 'Спецпредложение: ') + o.plan.toUpperCase() + ' ' + o.days + 'd';
+    }
+  } catch (e) {}
+}
 
 // Ставим сайт как приложение: service worker держит каркас для офлайна.
 if ('serviceWorker' in navigator) {

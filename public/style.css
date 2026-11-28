@@ -1157,6 +1157,11 @@ body.ads-off .app { height: 100dvh; }
 .agent-op.ok { border-color: rgba(63, 178, 127, .35); }
 .agent-op.err { border-color: rgba(224, 82, 82, .45); }
 .agent-op.skip { opacity: .65; }
+.agent-mcp { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.agent-mcp-head { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; }
+.agent-mcp-list { margin: 6px 0; padding: 7px 9px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; font-family: var(--mono); font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; max-height: 112px; overflow: auto; }
+.agent-mcp-list.muted { color: var(--text-3); font-family: var(--font); }
+.ghost.tiny { padding: 3px 8px; font-size: 11.5px; }
 @media (max-width: 700px) {
   .agent-op, .agent-note { margin-left: 0; }
   .agent-modal { width: 100%; }

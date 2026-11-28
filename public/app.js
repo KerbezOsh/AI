@@ -23,7 +23,7 @@ const state = {
 // Агент: мост на компьютере пользователя (public/agent/photonn-agent.js).
 // Токен и папка лежат в localStorage — без токена мост не отвечает.
 const AGENT_STORE = 'photonn.agent';
-const agent = { on: false, token: '', url: 'http://127.0.0.1:8787', root: '', connected: false, allowExec: false, autoApprove: false, busy: false };
+const agent = { on: false, token: '', url: 'http://127.0.0.1:8787', root: '', connected: false, allowExec: false, autoApprove: false, busy: false, mcp: { tools: [], servers: [], errors: [], file: '' } };
 try {
   const saved = JSON.parse(localStorage.getItem(AGENT_STORE) || '{}');
   agent.token = String(saved.token || '');
@@ -1040,7 +1040,8 @@ async function streamReply(view, text, opts) {
         regen: Boolean(opts && opts.regen),
         agent: Boolean(opts && opts.agent),
         agentStep: Boolean(opts && opts.agentStep),
-        hidden: Boolean(opts && opts.hidden)
+        hidden: Boolean(opts && opts.hidden),
+        mcpTools: opts && opts.agent ? agent.mcp.tools : undefined
       }),
       signal: controller.signal
     });
@@ -1143,7 +1144,7 @@ async function streamReply(view, text, opts) {
 
 // ── Агент: мост на компьютере, подтверждения, цикл инструментов ─────
 const AGENT_MAX_STEPS = 6;
-const AGENT_ICONS = { list: '📁', read: '📄', write: '✏️', patch: '🩹', exec: '⌘' };
+const AGENT_ICONS = { list: '📁', read: '📄', write: '✏️', patch: '🩹', exec: '⌘', mcp: '🔌' };
 
 function shortPath(p) {
   const parts = String(p || '').split(/[\\/]/).filter(Boolean);
@@ -1163,6 +1164,7 @@ function openAgentModal() {
   if (agent.token) $('agentToken').value = agent.token;
   if (agent.root) $('agentRoot').value = agent.root;
   agentStatus(agent.connected ? 'Подключено: ' + agent.root : 'Мост не подключён', agent.connected ? 'ok' : '');
+  renderMcpState();
   m.classList.remove('hidden');
   setTimeout(() => { try { $('agentToken').focus(); } catch (e) {} }, 40);
 }
@@ -1185,7 +1187,7 @@ function applyAgentUI() {
     strip.classList.toggle('hidden', !agent.on);
     const t = strip.querySelector('.agent-strip-text');
     if (t) t.textContent = agent.connected
-      ? (shortPath(agent.root) + (agent.allowExec ? ' · файлы и команды' : ' · только файлы'))
+      ? (shortPath(agent.root) + (agent.allowExec ? ' · файлы и команды' : ' · только файлы') + (agent.mcp.tools.length ? ' · MCP ' + agent.mcp.tools.length : ''))
       : 'мост не подключён';
   }
   const input = $('input');
@@ -1208,6 +1210,41 @@ async function agentBridge(pathname, body) {
   return j || {};
 }
 
+
+// MCP: каталог инструментов с локальных серверов пользователя (см. photonn-mcp.json).
+async function refreshMcp() {
+  if (!agent.connected) { agent.mcp = { tools: [], servers: [], errors: [], file: '' }; renderMcpState(); return; }
+  try {
+    setMcpState(await agentBridge('/mcp'));
+  } catch (e) {
+    agent.mcp = { tools: [], servers: [], errors: [e.message], file: '' };
+  }
+  renderMcpState();
+  applyAgentUI();
+}
+
+function setMcpState(j) {
+  agent.mcp = {
+    tools: Array.isArray(j && j.tools) ? j.tools : [],
+    servers: Array.isArray(j && j.servers) ? j.servers : [],
+    errors: Array.isArray(j && j.errors) ? j.errors : [],
+    file: String((j && j.file) || '')
+  };
+}
+
+function renderMcpState() {
+  const box = $('agentMcpList');
+  if (!box) return;
+  const names = agent.mcp.tools.map((t) => t.name);
+  if (!agent.mcp.file) { box.textContent = 'photonn-mcp.json не найден в рабочей папке — MCP-инструментов нет'; box.className = 'agent-mcp-list muted'; return; }
+  if (!names.length) {
+    box.textContent = 'файл есть, инструментов нет' + (agent.mcp.errors.length ? ' · ошибки: ' + agent.mcp.errors.join(' | ') : '');
+    box.className = 'agent-mcp-list muted';
+    return;
+  }
+  box.className = 'agent-mcp-list';
+  box.textContent = agent.mcp.servers.map((s) => s.name + ' · ' + s.tools).join('\n') + '\n' + names.slice(0, 12).join(', ') + (names.length > 12 ? ' …' : '');
+}
 // Молчаливое переподключение при загрузке: токен уже сохранён, мост мог остаться запущенным.
 async function autoConnectAgent() {
   if (!agent.token) return;
@@ -1217,6 +1254,7 @@ async function autoConnectAgent() {
     agent.root = info.root || agent.root;
     agent.allowExec = Boolean(info.allowExec);
     applyAgentUI();
+    await refreshMcp();
   } catch (e) {
     agent.connected = false;
     applyAgentUI();
@@ -1239,6 +1277,7 @@ async function connectAgent() {
     agent.on = true;
     saveAgent();
     applyAgentUI();
+    await refreshMcp();
     agentStatus('Подключено: ' + agent.root, 'ok');
     closeAgentModal();
     toast('Агент подключён · ' + shortPath(agent.root));
@@ -1299,6 +1338,7 @@ function summarizeToolResult(call, res) {
   if (call.tool === 'write') return 'записано ' + res.bytes + ' байт' + (res.backup ? ' · бэкап ' + res.backup : '');
   if (call.tool === 'patch') return 'правка применена, ' + res.bytes + ' байт' + (res.backup ? ' · бэкап ' + res.backup : '');
   if (call.tool === 'exec') return 'код ' + res.code + '\nstdout:\n' + clamp(res.stdout, 2500) + (res.stderr ? '\nstderr:\n' + clamp(res.stderr, 2500) : '');
+  if (call.tool === 'mcp') return (res.isError ? 'MCP вернул ошибку:\n' : '') + clamp(res.text, 6000);
   return clamp(JSON.stringify(res), 3000);
 }
 
@@ -1307,6 +1347,7 @@ function briefTool(call, res) {
   if (call.tool === 'read') return res.size + ' байт';
   if (call.tool === 'write' || call.tool === 'patch') return res.bytes + ' байт' + (res.backup ? ' · бэкап' : '');
   if (call.tool === 'exec') return 'код ' + res.code;
+  if (call.tool === 'mcp') return res && res.isError ? 'инструмент вернул ошибку' : 'готово';
   return 'готово';
 }
 
@@ -1314,8 +1355,8 @@ function agentOp(call) {
   const box = $('messages');
   const card = el('div', 'agent-op run');
   const head = el('div', 'agent-op-head');
-  head.append(el('span', 'agent-op-ico', AGENT_ICONS[call.tool] || '⚙'), el('b', '', String(call.tool || '')));
-  head.appendChild(el('code', '', call.path || call.cmd || '.'));
+  head.append(el('span', 'agent-op-ico', AGENT_ICONS[call.tool] || '⚙'), el('b', '', call.tool === 'mcp' ? 'MCP' : String(call.tool || '')));
+  head.appendChild(el('code', '', call.path || call.cmd || call.name || '.'));
   const detail = el('div', 'agent-op-detail', 'выполняю…');
   card.append(head, detail);
   box.appendChild(card);
@@ -1348,15 +1389,19 @@ function agentConfirm(call) {
     const allow = $('agentAllow');
     const deny = $('agentDeny');
     if (!back || !title || !allow || !deny) return resolve(false);
-    const titles = { write: 'Записать файл', patch: 'Изменить файл', exec: 'Выполнить команду' };
+    const titles = { write: 'Записать файл', patch: 'Изменить файл', exec: 'Выполнить команду', mcp: 'MCP-инструмент' };
     title.textContent = titles[call.tool] || 'Действие агента';
     pathEl.textContent = call.tool === 'exec'
       ? (call.cwd ? call.cwd + ' › ' : '') + (call.cmd || '')
-      : (call.path || '.');
+      : (call.tool === 'mcp' ? (call.name || '') : (call.path || '.'));
     if (call.tool === 'write') {
       bodyEl.textContent = String(call.content == null ? '' : call.content).slice(0, 1600) || '(пустой файл)';
     } else if (call.tool === 'patch') {
       bodyEl.textContent = '− ' + String(call.old || '').slice(0, 700) + '\n\n+ ' + String(call.new || '').slice(0, 700);
+    } else if (call.tool === 'mcp') {
+      let argsText = '(без аргументов)';
+      try { argsText = JSON.stringify(call.arguments || call.args || {}, null, 2).slice(0, 1600); } catch (e) {}
+      bodyEl.textContent = 'Внешний сервер может менять данные. Аргументы:\n' + argsText;
     } else {
       bodyEl.textContent = call.tool === 'exec' ? 'Выполнится в папке ' + (call.cwd || '.') : '';
     }
@@ -1377,8 +1422,19 @@ function agentConfirm(call) {
 
 async function runAgentTool(call) {
   const tool = String(call.tool || '');
-  if (!['list', 'read', 'write', 'patch', 'exec'].includes(tool)) throw new Error('неизвестный инструмент: ' + tool);
+  if (!['list', 'read', 'write', 'patch', 'exec', 'mcp'].includes(tool)) throw new Error('неизвестный инструмент: ' + tool);
   if (tool === 'exec' && !agent.allowExec) throw new Error('выполнение команд выключено в мосту (--allow-exec)');
+  if (tool === 'mcp') {
+    const name = String(call.name || '');
+    if (!name) throw new Error('не указан MCP-инструмент');
+    if (!agent.mcp.tools.some((t) => t.name === name)) throw new Error('MCP-инструмент не найден в каталоге: ' + name);
+    if (!agent.autoApprove) {
+      const ok = await agentConfirm(call);
+      if (!ok) return { skipped: true };
+    }
+    const j = await agentBridge('/call', { tool: 'mcp', args: { name: name, arguments: call.arguments || call.args || {} } });
+    return j.result || {};
+  }
   if ((tool === 'write' || tool === 'patch' || tool === 'exec') && !agent.autoApprove) {
     const ok = await agentConfirm(call);
     if (!ok) return { skipped: true };
@@ -1404,6 +1460,7 @@ async function agentRun(text) {
   agent.busy = true;
   let results = '';
   let finalSeen = false;
+  let lastSig = '';
   try {
     for (let step = 0; step < AGENT_MAX_STEPS; step++) {
       const prompt = step === 0 ? text : 'Результаты инструментов:\n' + results;
@@ -1413,6 +1470,16 @@ async function agentRun(text) {
       const out = await streamReply(view, prompt, { agent: true, hidden: step > 0, agentStep: step > 0 });
       const calls = extractToolCalls(out);
       if (!calls.length) { finalSeen = true; break; }
+      // Та же пачка вызовов второй раз подряд: результат уже есть, добиваем финальным ответом.
+      const sig = calls.map((c) => c.tool + '|' + (c.name || c.path || c.cmd || '') + '|' + JSON.stringify(c.arguments || c.args || c.content || c.old || '')).join(';');
+      if (sig === lastSig) {
+        view.row.remove();
+        const at = state.messages.indexOf(msg);
+        if (at >= 0) state.messages.splice(at, 1);
+        results += 'Тот же вызов повторяется, новых данных нет. Повторять его не нужно — ответь текстом.';
+        break;
+      }
+      lastSig = sig;
       view.row.remove();
       const at = state.messages.indexOf(msg);
       if (at >= 0) state.messages.splice(at, 1);
@@ -1426,11 +1493,20 @@ async function agentRun(text) {
         let err = '';
         try { res = await runAgentTool(call); } catch (e) { err = e.message || 'ошибка инструмента'; }
         paintAgentOp(card, call, res, err);
-        results += '[' + (i + 1) + '] ' + call.tool + '(' + (call.path || call.cmd || '') + ')\n'
+        results += '[' + (i + 1) + '] ' + call.tool + '(' + (call.path || call.cmd || call.name || '') + ')\n'
           + (err ? 'ОШИБКА: ' + err : summarizeToolResult(call, res)) + '\n\n';
       }
     }
-    if (!finalSeen) toast('Агент остановился на ' + AGENT_MAX_STEPS + ' шагах — уточни задачу');
+    if (!finalSeen) {
+      // Гарантированный финал: один запрос без права вызывать инструменты.
+      const tail = { role: 'assistant', content: '', reasoning: '' };
+      state.messages.push(tail);
+      const tailView = appendStreamingMessage(tail);
+      try {
+        await streamReply(tailView, 'Инструменты больше не вызывай, это финальный шаг. Результаты инструментов:\n' + (results || '(нет)') + '\n\nОтветь пользователю по-русски: что сделано и что получилось. Блоков photonn-tool быть не должно.', { agent: true, hidden: true, agentStep: true });
+        finalSeen = true;
+      } catch (e) {}
+    }
   } finally {
     agent.busy = false;
     setStreamingUI(false);
@@ -2333,6 +2409,21 @@ on('mNew', () => newChat(false));
   on('agentSetup', openAgentModal);
   on('agentOff', () => { agent.on = false; saveAgent(); applyAgentUI(); });
   on('agentConnect', connectAgent);
+  on('agentMcpReload', async () => {
+    const b = $('agentMcpReload');
+    if (!agent.connected) { toast('Сначала подключи мост агента'); return; }
+    b.disabled = true;
+    try {
+      setMcpState(await agentBridge('/mcp/reload', { reload: true }));
+      renderMcpState();
+      applyAgentUI();
+      toast('MCP: ' + agent.mcp.tools.length + ' инструмент(ов)');
+    } catch (e) {
+      toast(e.message);
+    } finally {
+      b.disabled = false;
+    }
+  });
   on('btnInstall', openInstall);
   on('installClose', () => $('installModal').classList.add('hidden'));
   on('installNow', installApp);

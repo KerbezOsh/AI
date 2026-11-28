@@ -10,7 +10,7 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const crypto = require('crypto');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 
 const VERSION = '1.0.0';
 const MAX_BODY = 4 * 1024 * 1024;
@@ -33,6 +33,7 @@ if (flag('help')) {
   console.log('  --port <n>       порт на 127.0.0.1, по умолчанию 8787');
   console.log('  --token <строка> свой токен; иначе случайный, печатается при старте');
   console.log('  --allow-exec     разрешить выполнение команд (по умолчанию выключено)');
+  console.log('  --mcp <файл>     конфиг MCP-серверов (по умолчанию photonn-mcp.json в рабочей папке)');
   process.exit(0);
 }
 
@@ -147,7 +148,254 @@ function doExec(args) {
   });
 }
 
-const TOOLS = { list: doList, read: doRead, write: doWrite, patch: doPatch, exec: doExec };
+
+// ── MCP: инструменты с локальных MCP-серверов пользователя ─────────
+// Конфиг: photonn-mcp.json в рабочей папке (или --mcp <файл>).
+// stdio-серверы: {command, args, env, cwd}; HTTP-серверы: {url, headers}.
+
+const MCP_FILE = arg('mcp', '');
+const MCP = { file: '', servers: new Map(), tools: [], errors: [] };
+
+function mcpResult(result) {
+  const parts = result && Array.isArray(result.content) ? result.content : [];
+  const texts = parts.filter((p) => p && p.type === 'text' && typeof p.text === 'string').map((p) => p.text);
+  if (result && result.structuredContent) texts.push(JSON.stringify(result.structuredContent));
+  const other = parts.filter((p) => p && p.type !== 'text').map((p) => '[' + p.type + ']');
+  const text = texts.join('\n') || other.join(', ') || '(пусто)';
+  return { text: text.slice(0, MAX_OUT), isError: Boolean(result && result.isError) };
+}
+
+class StdioMcp {
+  constructor(name, cfg) {
+    this.name = name;
+    this.cfg = cfg;
+    this.proc = null;
+    this.buf = '';
+    this.id = 0;
+    this.pending = new Map();
+    this.tools = [];
+  }
+  onData(chunk) {
+    this.buf += chunk.toString('utf8');
+    let cut;
+    while ((cut = this.buf.indexOf('\n')) >= 0) {
+      const line = this.buf.slice(0, cut).trim();
+      this.buf = this.buf.slice(cut + 1);
+      if (!line) continue;
+      let msg;
+      try { msg = JSON.parse(line); } catch (e) { continue; }
+      if (msg && msg.id != null && this.pending.has(msg.id)) {
+        const p = this.pending.get(msg.id);
+        this.pending.delete(msg.id);
+        if (msg.error) p.reject(new Error(msg.error.message || 'ошибка MCP'));
+        else p.resolve(msg.result || {});
+      }
+    }
+  }
+  send(obj) {
+    if (!this.proc || !this.proc.stdin.writable) throw new Error('MCP-процесс не запущен');
+    this.proc.stdin.write(JSON.stringify(obj) + '\n');
+  }
+  request(method, params, timeout) {
+    const ms = timeout || 45000;
+    const id = ++this.id;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error('MCP: нет ответа на ' + method + ' за ' + Math.round(ms / 1000) + ' с'));
+      }, ms);
+      this.pending.set(id, {
+        resolve: (v) => { clearTimeout(timer); resolve(v); },
+        reject: (e) => { clearTimeout(timer); reject(e); }
+      });
+      try { this.send({ jsonrpc: '2.0', id: id, method: method, params: params || {} }); }
+      catch (e) { clearTimeout(timer); this.pending.delete(id); reject(e); }
+    });
+  }
+  notify(method, params) {
+    try { this.send({ jsonrpc: '2.0', method: method, params: params || {} }); } catch (e) {}
+  }
+  async start() {
+    try {
+      return await this.boot(this.cfg.shell != null ? Boolean(this.cfg.shell) : false);
+    } catch (e) {
+      // На Windows npx/команды из PATH запускаются только через shell.
+      if (process.platform === 'win32' && this.cfg.shell == null && /ENOENT|не найден/i.test(e.message)) {
+        return await this.boot(true);
+      }
+      throw e;
+    }
+  }
+  async boot(shell) {
+    const env = Object.assign({}, process.env, this.cfg.env || {});
+    this.pending.clear();
+    this.buf = '';
+    this.proc = spawn(String(this.cfg.command), Array.isArray(this.cfg.args) ? this.cfg.args.map(String) : [], {
+      cwd: this.cfg.cwd ? resolveInRoot(this.cfg.cwd) : ROOT,
+      env: env,
+      shell: shell,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    this.proc.stdout.on('data', (d) => this.onData(d));
+    this.proc.stderr.on('data', (d) => { if (process.env.AGENT_DEBUG) console.log('[mcp:' + this.name + '] ' + String(d).trim().slice(0, 400)); });
+    this.proc.on('error', (e) => { for (const p of this.pending.values()) p.reject(new Error('MCP не запустился: ' + e.message)); this.pending.clear(); });
+    this.proc.on('exit', (code) => {
+      for (const p of this.pending.values()) p.reject(new Error('MCP-сервер завершился (код ' + code + ')'));
+      this.pending.clear();
+    });
+    await this.request('initialize', {
+      protocolVersion: '2024-11-05',
+      capabilities: {},
+      clientInfo: { name: 'photonn-agent', version: VERSION }
+    }, 60000);
+    this.notify('notifications/initialized', {});
+    const list = await this.request('tools/list', {}, 60000);
+    this.tools = (list && Array.isArray(list.tools)) ? list.tools : [];
+    return this.tools;
+  }
+  async call(name, args) {
+    const r = await this.request('tools/call', { name: name, arguments: args || {} }, 120000);
+    return mcpResult(r);
+  }
+  stop() { try { this.proc.kill(); } catch (e) {} }
+}
+
+class HttpMcp {
+  constructor(name, cfg) {
+    this.name = name;
+    this.cfg = cfg;
+    this.id = 0;
+    this.sessionId = '';
+    this.tools = [];
+  }
+  headers() {
+    return Object.assign({
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream'
+    }, this.cfg.headers || {}, this.sessionId ? { 'Mcp-Session-Id': this.sessionId } : {});
+  }
+  async request(method, params, timeout) {
+    const ms = timeout || 45000;
+    const id = ++this.id;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    try {
+      const r = await fetch(String(this.cfg.url), {
+        method: 'POST',
+        headers: this.headers(),
+        body: JSON.stringify({ jsonrpc: '2.0', id: id, method: method, params: params || {} }),
+        signal: ctrl.signal
+      });
+      const sid = r.headers.get('mcp-session-id');
+      if (sid) this.sessionId = sid;
+      const ct = String(r.headers.get('content-type') || '');
+      let msg = null;
+      if (ct.indexOf('text/event-stream') >= 0) {
+        const txt = await r.text();
+        for (const line of txt.split('\n')) {
+          if (line.indexOf('data:') !== 0) continue;
+          const raw = line.slice(5).trim();
+          if (!raw || raw === '[DONE]') continue;
+          try {
+            const o = JSON.parse(raw);
+            if (o && (o.id === id || o.result || o.error)) { msg = o; break; }
+          } catch (e) {}
+        }
+      } else {
+        msg = await r.json();
+      }
+      if (!msg) throw new Error('MCP HTTP: пустой ответ');
+      if (msg.error) throw new Error(msg.error.message || 'ошибка MCP');
+      return msg.result || {};
+    } catch (e) {
+      if (e && e.name === 'AbortError') throw new Error('MCP HTTP: нет ответа за ' + Math.round(ms / 1000) + ' с');
+      throw e;
+    } finally { clearTimeout(timer); }
+  }
+  notify(method, params) {
+    fetch(String(this.cfg.url), {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify({ jsonrpc: '2.0', method: method, params: params || {} })
+    }).catch(() => {});
+  }
+  async start() {
+    await this.request('initialize', {
+      protocolVersion: '2024-11-05',
+      capabilities: {},
+      clientInfo: { name: 'photonn-agent', version: VERSION }
+    }, 60000);
+    this.notify('notifications/initialized', {});
+    const list = await this.request('tools/list', {}, 60000);
+    this.tools = (list && Array.isArray(list.tools)) ? list.tools : [];
+    return this.tools;
+  }
+  async call(name, args) {
+    const r = await this.request('tools/call', { name: name, arguments: args || {} }, 120000);
+    return mcpResult(r);
+  }
+  stop() {}
+}
+
+async function loadMcpServers() {
+  for (const s of MCP.servers.values()) { try { s.stop(); } catch (e) {} }
+  MCP.servers.clear();
+  MCP.tools = [];
+  MCP.errors = [];
+  const file = MCP_FILE ? path.resolve(MCP_FILE) : path.join(ROOT, 'photonn-mcp.json');
+  MCP.file = file;
+  if (!fs.existsSync(file)) return;
+  let cfg;
+  try { cfg = JSON.parse(fs.readFileSync(file, 'utf8')); }
+  catch (e) { MCP.errors.push('photonn-mcp.json: ' + e.message); return; }
+  const list = cfg && cfg.mcpServers && typeof cfg.mcpServers === 'object' ? cfg.mcpServers : {};
+  for (const name of Object.keys(list)) {
+    const sc = list[name] || {};
+    try {
+      const client = sc.url ? new HttpMcp(name, sc) : sc.command ? new StdioMcp(name, sc) : null;
+      if (!client) throw new Error('нужен command или url');
+      const tools = await client.start();
+      MCP.servers.set(name, client);
+      for (const t of tools) {
+        if (!t || !t.name) continue;
+        MCP.tools.push({
+          server: name,
+          name: name + '__' + String(t.name),
+          orig: String(t.name),
+          description: String(t.description || '').slice(0, 600),
+          inputSchema: t.inputSchema || null
+        });
+      }
+      console.log('[mcp] ' + name + ': ' + tools.length + ' инстр.');
+    } catch (e) {
+      MCP.errors.push(name + ': ' + e.message);
+      console.log('[mcp] ' + name + ': ошибка — ' + e.message);
+    }
+  }
+}
+
+function mcpState() {
+  return {
+    ok: true,
+    file: MCP.file,
+    errors: MCP.errors.slice(0, 20),
+    servers: [...MCP.servers.keys()].map((name) => ({ name: name, tools: (MCP.servers.get(name).tools || []).length })),
+    tools: MCP.tools.map((t) => ({ name: t.name, server: t.server, description: t.description, inputSchema: t.inputSchema }))
+  };
+}
+
+function doMcp(args) {
+  const name = String(args.name || '');
+  const tool = MCP.tools.find((t) => t.name === name);
+  if (!tool) throw new Error('MCP-инструмент не найден: ' + name + ' (перезагрузи MCP в окне агента)');
+  const client = MCP.servers.get(tool.server);
+  if (!client) throw new Error('MCP-сервер не подключён: ' + tool.server);
+  const params = args.arguments && typeof args.arguments === 'object' ? args.arguments : {};
+  return client.call(tool.orig, params);
+}
+
+const TOOLS = { list: doList, read: doRead, write: doWrite, patch: doPatch, exec: doExec, mcp: doMcp };
 
 function send(res, status, obj) {
   const body = JSON.stringify(obj);
@@ -193,7 +441,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === '/info') {
-    return send(res, 200, { ok: true, version: VERSION, root: ROOT, allowExec: ALLOW_EXEC, tools: Object.keys(TOOLS) });
+    return send(res, 200, { ok: true, version: VERSION, root: ROOT, allowExec: ALLOW_EXEC, tools: Object.keys(TOOLS), mcpServers: MCP.servers.size, mcpTools: MCP.tools.length, mcpFile: MCP.file });
   }
 
   if (url.pathname === '/workspace' && req.method === 'POST') {
@@ -203,7 +451,8 @@ const server = http.createServer(async (req, res) => {
       if (!fs.existsSync(next) || !fs.statSync(next).isDirectory()) throw new Error('папка не найдена');
       ROOT = next;
       console.log('[агент] рабочая папка:', ROOT);
-      return send(res, 200, { ok: true, root: ROOT });
+      await loadMcpServers();
+      return send(res, 200, { ok: true, root: ROOT, mcpTools: MCP.tools.length });
     } catch (e) { return send(res, 400, { ok: false, error: e.message }); }
   }
 
@@ -214,6 +463,17 @@ const server = http.createServer(async (req, res) => {
       if (!fn) throw new Error('неизвестный инструмент: ' + body.tool);
       const result = await fn(body.args && typeof body.args === 'object' ? body.args : {});
       return send(res, 200, { ok: true, result });
+    } catch (e) { return send(res, 200, { ok: false, error: e.message }); }
+  }
+
+  if (url.pathname === '/mcp' && req.method === 'GET') {
+    return send(res, 200, mcpState());
+  }
+
+  if (url.pathname === '/mcp/reload' && req.method === 'POST') {
+    try {
+      await loadMcpServers();
+      return send(res, 200, mcpState());
     } catch (e) { return send(res, 200, { ok: false, error: e.message }); }
   }
 
@@ -231,4 +491,15 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log('  ' + TOKEN);
   console.log('');
   console.log('  Остановить: Ctrl+C. Мост слушает только этот компьютер.');
+  loadMcpServers().then(() => {
+    if (!MCP.tools.length && !MCP.errors.length) return;
+    console.log('');
+    console.log('  MCP: ' + MCP.servers.size + ' сервер(ов), ' + MCP.tools.length + ' инструмент(ов)');
+    if (MCP.errors.length) console.log('  MCP ошибки: ' + MCP.errors.join(' | '));
+  });
+});
+
+process.on('SIGINT', () => {
+  for (const s of MCP.servers.values()) { try { s.stop(); } catch (e) {} }
+  process.exit(0);
 });

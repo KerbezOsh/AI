@@ -10,7 +10,7 @@
 <link rel='apple-touch-icon' href='/icon-192.png'>
 <meta name='apple-mobile-web-app-capable' content='yes'>
 <meta name='apple-mobile-web-app-title' content='photonnAI'>
-<link rel='stylesheet' href='/style.css?v=28'>
+<link rel='stylesheet' href='/style.css?v=29'>
 <script>
   // Тему ставим до первой отрисовки, иначе при светлой теме экран мигает чёрным.
   try {
@@ -188,6 +188,11 @@
       <input class='field' id='agentRoot' type='text' autocomplete='off' placeholder='C:\projects\my-app'>
       <div class='agent-status' id='agentStatus'>Мост не подключён</div>
       <button class='primary wide' id='agentConnect'>Подключиться</button>
+      <div class='agent-mcp'>
+        <div class='agent-mcp-head'><b>MCP-серверы</b><button class='ghost tiny' id='agentMcpReload' type='button'>Обновить</button></div>
+        <div class='agent-mcp-list' id='agentMcpList'>Не подключены</div>
+        <div class='vip-note'>Инструменты берутся из <code>photonn-mcp.json</code> в рабочей папке. Образец: <a href='/agent/photonn-mcp.example.json' download='photonn-mcp.json'>photonn-mcp.example.json</a>.</div>
+      </div>
       <div class='vip-note'>Команды <code>exec</code> выключены по умолчанию — включить можно флагом <code>--allow-exec</code> при запуске моста. Каждая запись, правка и команда подтверждается в чате.</div>
     </div>
   </div>
@@ -312,7 +317,7 @@
 (function () {
   if ('caches' in window) {
     caches.keys().then(function (ks) {
-      ks.forEach(function (k) { if (k.indexOf('photonn-v28') !== 0) caches.delete(k); });
+      ks.forEach(function (k) { if (k.indexOf('photonn-v29') !== 0) caches.delete(k); });
     }).catch(function () {});
   }
   if ('serviceWorker' in navigator) {
@@ -322,6 +327,6 @@
   }
 })();
 </script>
-<script src='/app.js?v=28'></script>
+<script src='/app.js?v=29'></script>
 </body>
 </html>

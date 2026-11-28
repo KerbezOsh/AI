@@ -928,11 +928,11 @@ function appendStreamingMessage(msg) {
       tag.textContent = tierLabel(tier || 'pro') + (fallback ? ' · резерв' : '');
       tag.classList.remove('hidden');
     },
-    setSearch(query, found, failed) {
+    setSearch(query, found, failed, reason) {
       msg.search = query;
       searchNote.textContent = typeof found === 'number' && found >= 0
         ? (failed
-          ? '🌐 поиск: «' + query + '» — сервис недоступен'
+          ? '🌐 поиск: «' + query + '» — не удалось (' + (reason || 'сервис недоступен') + ')'
           : '🌐 поиск: «' + query + '» — ' + (found ? 'найдено ' + found + ' источников' : 'ничего не найдено'))
         : '🌐 ищу в интернете: «' + query + '»…';
       searchNote.classList.remove('hidden');
@@ -1066,7 +1066,7 @@ async function streamReply(view, text, opts) {
           continue;
         }
         if (j.status && j.status.search) {
-          view.setSearch(j.status.search, typeof j.status.found === 'number' ? j.status.found : undefined, Boolean(j.status.failed));
+          view.setSearch(j.status.search, typeof j.status.found === 'number' ? j.status.found : undefined, Boolean(j.status.failed), j.status.reason);
           continue;
         }
         if (j.error) throw new Error(j.error);

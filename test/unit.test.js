@@ -32,6 +32,9 @@ test('verifyCodeSyntax: JS ok / syntax error / runtime error / TS skipped', asyn
   const rt = await verifyCodeSyntax('```js\nthrow new Error("boom");\n```');
   assert.ok(rt.some((s) => s.includes('boom')));
   assert.deepEqual(await verifyCodeSyntax('```ts\nconst x: number = 1;\n```'), []);
+  assert.deepEqual(await verifyCodeSyntax('```js\ndocument.querySelector(".a").textContent = "hi";\n```'), []);
+  assert.deepEqual(await verifyCodeSyntax('```js\nasync function f(){ await fetch("/"); }\n```'), []);
+  assert.deepEqual(await verifyCodeSyntax('```js\nawait fetch("/");\n```'), []);
 });
 
 test('verifyCodeSyntax: JSON', async () => {

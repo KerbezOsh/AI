@@ -1163,7 +1163,16 @@ body.ads-off .app { height: 100dvh; }
 .agent-mcp-list.muted { color: var(--text-3); font-family: var(--font); }
 .ghost.tiny { padding: 3px 8px; font-size: 11.5px; }
 @media (max-width: 700px) {
-  .agent-op, .agent-note { margin-left: 0; }
+  .agent-dl { display: block; text-align: center; text-decoration: none; margin: 12px 0 4px; }
+.agent-code { font-family: var(--mono); text-transform: uppercase; letter-spacing: 3px; font-size: 18px; text-align: center; }
+.agent-code::placeholder { letter-spacing: 2px; font-size: 13px; }
+.agent-detect { margin: 6px 0 2px; font-size: 12px; color: var(--text-3); text-align: center; }
+.agent-detect.ok { color: var(--success, #3fb27f); }
+.agent-detect.err { color: var(--danger); }
+.agent-advanced { margin: 10px 0 2px; border-top: 1px solid var(--line); padding-top: 8px; }
+.agent-advanced summary { cursor: pointer; font-size: 12px; color: var(--text-3); }
+.agent-advanced summary:hover { color: var(--text); }
+.agent-op, .agent-note { margin-left: 0; }
   .agent-modal { width: 100%; }
 }
 

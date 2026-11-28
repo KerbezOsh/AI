@@ -10,7 +10,7 @@
 <link rel='apple-touch-icon' href='/icon-192.png'>
 <meta name='apple-mobile-web-app-capable' content='yes'>
 <meta name='apple-mobile-web-app-title' content='photonnAI'>
-<link rel='stylesheet' href='/style.css?v=29'>
+<link rel='stylesheet' href='/style.css?v=30'>
 <script>
   // Тему ставим до первой отрисовки, иначе при светлой теме экран мигает чёрным.
   try {
@@ -175,19 +175,24 @@
       <div class='logo big'>🖥</div>
       <h3>Агент на компьютере</h3>
       <p class='modal-sub'>В этом режиме ИИ читает и правит файлы в выбранной папке. Доступ даёт маленький мост — он работает только на твоём компьютере и слушает 127.0.0.1.</p>
+      <a class='primary wide agent-dl' id='agentDownload' href='/api/agent/bundle.zip' download='photonn-agent.zip'>Скачать мост (zip)</a>
       <ol class='agent-steps'>
-        <li>Скачай мост: <a id='agentDownload' href='/agent/photonn-agent.js' download='photonn-agent.js'>photonn-agent.js</a></li>
-        <li>Запусти в терминале, указав папку проекта:
-          <pre class='agent-cmd'>node photonn-agent.js --root C:\projects\my-app</pre>
-        </li>
-        <li>Скопируй токен из консоли и вставь сюда. Адрес моста — <code>http://127.0.0.1:8787</code>.</li>
+        <li>Распакуй архив в любую папку и запусти <code>start-agent.cmd</code> — двойным кликом.</li>
+        <li>В чёрном окне появится <b>код подключения</b>. Введи его сюда.</li>
       </ol>
-      <label class='field-label' for='agentToken'>Токен из консоли</label>
-      <input class='field' id='agentToken' type='password' autocomplete='off' placeholder='32 символа'>
-      <label class='field-label' for='agentRoot'>Рабочая папка (необязательно)</label>
-      <input class='field' id='agentRoot' type='text' autocomplete='off' placeholder='C:\projects\my-app'>
+      <label class='field-label' for='agentCode'>Код подключения</label>
+      <input class='field agent-code' id='agentCode' type='text' autocomplete='off' spellcheck='false' maxlength='16' placeholder='ABC-DEF'>
+      <div class='agent-detect' id='agentDetect'>проверяю мост…</div>
+      <button class='primary wide' id='agentConnect'>Подключить</button>
+      <details class='agent-advanced'>
+        <summary>Запускаю вручную или есть токен</summary>
+        <label class='field-label' for='agentToken'>Токен моста</label>
+        <input class='field' id='agentToken' type='password' autocomplete='off' placeholder='если подключаешься вручную'>
+        <label class='field-label' for='agentRoot'>Рабочая папка (необязательно)</label>
+        <input class='field' id='agentRoot' type='text' autocomplete='off' placeholder='C:\projects\my-app'>
+        <div class='vip-note'>Вручную: <code>node photonn-agent.js --root C:\projects\my-app</code>. Без папки мост работает в <code>photonn-workspace</code> рядом со скриптом.</div>
+      </details>
       <div class='agent-status' id='agentStatus'>Мост не подключён</div>
-      <button class='primary wide' id='agentConnect'>Подключиться</button>
       <div class='agent-mcp'>
         <div class='agent-mcp-head'><b>MCP-серверы</b><button class='ghost tiny' id='agentMcpReload' type='button'>Обновить</button></div>
         <div class='agent-mcp-list' id='agentMcpList'>Не подключены</div>
@@ -317,7 +322,7 @@
 (function () {
   if ('caches' in window) {
     caches.keys().then(function (ks) {
-      ks.forEach(function (k) { if (k.indexOf('photonn-v29') !== 0) caches.delete(k); });
+      ks.forEach(function (k) { if (k.indexOf('photonn-v30') !== 0) caches.delete(k); });
     }).catch(function () {});
   }
   if ('serviceWorker' in navigator) {
@@ -327,6 +332,6 @@
   }
 })();
 </script>
-<script src='/app.js?v=29'></script>
+<script src='/app.js?v=30'></script>
 </body>
 </html>

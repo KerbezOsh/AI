@@ -764,7 +764,7 @@ function messageNode(msg, question) {
   const bubble = el('div', 'bubble');
 
   const parsed = msg.role === 'assistant' ? splitThinking(msg.content, msg.reasoning) : { content: msg.content, reasoning: '' };
-  if (msg.role === 'assistant' && /```photonn-tool/.test(String(parsed.content || ''))) {
+  if (msg.role === 'assistant' && /```photonn-tool|^\s*`{0,3}\s*photonn-tool\s*`{0,3}\s*$/m.test(String(parsed.content || ''))) {
     parsed.content = stripToolCalls(parsed.content) || '_Агент выполнял действия с файлами._';
   }
   const body = msg.role === 'assistant' && !String(parsed.content || '').trim()
@@ -1145,10 +1145,18 @@ async function streamReply(view, text, opts) {
 // ── Агент: мост на компьютере, подтверждения, цикл инструментов ─────
 const AGENT_MAX_STEPS = 6;
 const AGENT_ICONS = { list: '📁', read: '📄', write: '✏️', patch: '🩹', exec: '⌘', mcp: '🔌' };
+// Открытое подтверждение можно отменить сменой чата, иначе промис висит и агент «занят» навсегда.
+let agentConfirmCancel = null;
+function cancelAgentConfirm() {
+  const f = agentConfirmCancel;
+  agentConfirmCancel = null;
+  if (f) { try { f(); } catch (e) {} }
+}
 
 function shortPath(p) {
   const parts = String(p || '').split(/[\\/]/).filter(Boolean);
-  return parts.slice(-2).join('/') || p || '.';
+  const tail = parts.slice(-2).map((s) => (s.length > 22 ? s.slice(0, 20) + '…' : s));
+  return tail.join('/') || p || '.';
 }
 
 function agentStatus(text, kind) {
@@ -1166,7 +1174,29 @@ function openAgentModal() {
   agentStatus(agent.connected ? 'Подключено: ' + agent.root : 'Мост не подключён', agent.connected ? 'ok' : '');
   renderMcpState();
   m.classList.remove('hidden');
-  setTimeout(() => { try { $('agentToken').focus(); } catch (e) {} }, 40);
+  probeBridge();
+  setTimeout(() => { try { $('agentCode').focus(); } catch (e) {} }, 40);
+}
+
+// Мост слушает 127.0.0.1: проверяем, запущен ли он, чтобы подсказать следующий шаг.
+async function probeBridge() {
+  const note = $('agentDetect');
+  if (note) { note.textContent = 'проверяю мост…'; note.className = 'agent-detect'; }
+  try {
+    const r = await fetch(agent.url + '/health', { cache: 'no-store' });
+    const j = await r.json();
+    if (!j || !j.ok) throw new Error('bad');
+    if (note) {
+      note.textContent = j.pairAvailable === false
+        ? 'мост запущен, но код уже использован — перезапусти start-agent.cmd'
+        : 'мост запущен — введи код из его окна';
+      note.className = 'agent-detect ok';
+    }
+    return j;
+  } catch (e) {
+    if (note) { note.textContent = 'мост не найден — скачай архив и запусти start-agent.cmd'; note.className = 'agent-detect err'; }
+    return null;
+  }
 }
 
 function closeAgentModal() {
@@ -1213,7 +1243,7 @@ async function agentBridge(pathname, body) {
 
 // MCP: каталог инструментов с локальных серверов пользователя (см. photonn-mcp.json).
 async function refreshMcp() {
-  if (!agent.connected) { agent.mcp = { tools: [], servers: [], errors: [], file: '' }; renderMcpState(); return; }
+  if (!agent.connected) { agent.mcp = { tools: [], servers: [], errors: [], file: '' }; renderMcpState(); applyAgentUI(); return; }
   try {
     setMcpState(await agentBridge('/mcp'));
   } catch (e) {
@@ -1261,18 +1291,45 @@ async function autoConnectAgent() {
   }
 }
 
+// Код из окна моста меняем на токен: так пользователю не нужно копировать 32 символа.
+async function pairBridge(code) {
+  let r;
+  try {
+    r = await fetch(agent.url + '/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: code })
+    });
+  } catch (e) {
+    throw new Error('мост не отвечает на 127.0.0.1:8787 — запусти start-agent.cmd');
+  }
+  let j = null;
+  try { j = await r.json(); } catch (e) {}
+  if (r.status === 429) throw new Error('слишком много попыток — подожди 10 минут');
+  if (!r.ok || !j || !j.token) throw new Error((j && j.error) || 'код не подошёл');
+  return j;
+}
+
 async function connectAgent() {
   const btn = $('agentConnect');
-  agent.token = $('agentToken').value.trim();
-  const root = $('agentRoot').value.trim();
-  if (!agent.token) { agentStatus('Вставь токен из консоли моста', 'err'); return; }
+  const code = ($('agentCode').value || '').trim();
+  const token = ($('agentToken').value || '').trim();
+  const root = ($('agentRoot').value || '').trim();
+  if (!code && !token) { agentStatus('Введи код из окна моста', 'err'); $('agentCode').focus(); return; }
   btn.disabled = true;
   agentStatus('Подключаюсь…');
   try {
+    if (code) {
+      const paired = await pairBridge(code);
+      agent.token = paired.token;
+      $('agentCode').value = '';
+    } else {
+      agent.token = token;
+    }
     if (root) await agentBridge('/workspace', { root });
     const info = await agentBridge('/info');
     agent.connected = true;
-    agent.root = info.root || root;
+    agent.root = info.root || agent.root;
     agent.allowExec = Boolean(info.allowExec);
     agent.on = true;
     saveAgent();
@@ -1310,20 +1367,45 @@ function extractToolCalls(text) {
     }
   }
   if (!out.length) {
+    // Модель иногда пишет только метку без кавычек, а JSON — следующей строкой.
+    const marker = /photonn-tool\s*([\s\S]{0,4000}?)(?:```|$)/i.exec(src);
+    if (marker) {
+      try { const j = JSON.parse(marker[1].trim()); if (j && j.tool) out.push(j); } catch (e) {}
+    }
+  }
+  if (!out.length) {
     for (const line of src.split('\n')) {
       const t = line.trim();
       if (!t.startsWith('{') || !t.endsWith('}')) continue;
       try { const j = JSON.parse(t); if (j && j.tool) out.push(j); } catch (e) {}
     }
   }
-  return out.slice(0, 4);
+  const seen = new Set();
+  return out.filter((c) => {
+    const key = c.tool + '|' + (c.name || c.path || c.cmd || '') + '|' + JSON.stringify(c.arguments || c.args || c.content || c.old || '');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 4);
 }
 
 function stripToolCalls(text) {
-  return String(text || '')
-    .replace(/```photonn-tool[\s\S]*?```/g, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  let out = String(text || '').replace(/```photonn-tool[\s\S]*?```/g, '');
+  // Модель иногда кладёт вызов в обычный ```json — его тоже не показываем.
+  out = out.replace(/```[a-zA-Z0-9_-]*\s*([\s\S]*?)```/g, (whole, body) => {
+    try { const j = JSON.parse(String(body).trim()); if (j && j.tool) return ''; } catch (e) {}
+    return whole;
+  });
+  // И совсем без кавычек: строка «photonn-tool» и JSON-строка под ней.
+  out = out.split('\n').filter((line) => {
+    const t = line.trim();
+    if (/^`{0,3}\s*photonn-tool\s*`{0,3}$/i.test(t)) return false;
+    if (t.startsWith('{') && t.endsWith('}')) {
+      try { const j = JSON.parse(t.replace(/^`+|`+$/g, '')); if (j && j.tool) return false; } catch (e) {}
+    }
+    return true;
+  }).join('\n');
+  return out.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function summarizeToolResult(call, res) {
@@ -1412,9 +1494,11 @@ function agentConfirm(call) {
       back.classList.add('hidden');
       allow.onclick = null;
       deny.onclick = null;
+      agentConfirmCancel = null;
       if (ok && allowAll.checked) agent.autoApprove = true;
       resolve(ok);
     };
+    agentConfirmCancel = () => done(false);
     allow.onclick = () => done(true);
     deny.onclick = () => done(false);
   });
@@ -1427,7 +1511,9 @@ async function runAgentTool(call) {
   if (tool === 'mcp') {
     const name = String(call.name || '');
     if (!name) throw new Error('не указан MCP-инструмент');
-    if (!agent.mcp.tools.some((t) => t.name === name)) throw new Error('MCP-инструмент не найден в каталоге: ' + name);
+    let known = agent.mcp.tools.some((t) => t.name === name);
+    if (!known) { await refreshMcp(); known = agent.mcp.tools.some((t) => t.name === name); }
+    if (!known) throw new Error('MCP-инструмент не найден в каталоге: ' + name);
     if (!agent.autoApprove) {
       const ok = await agentConfirm(call);
       if (!ok) return { skipped: true };
@@ -1458,16 +1544,24 @@ async function revealAgentAnswer() {
 async function agentRun(text) {
   if (!agent.connected) { openAgentModal(); toast('Сначала подключи мост агента'); return; }
   agent.busy = true;
+  const chatId = state.currentId;
   let results = '';
   let finalSeen = false;
   let lastSig = '';
   try {
     for (let step = 0; step < AGENT_MAX_STEPS; step++) {
+      if (state.currentId !== chatId) { agentNote('Чат переключён — прогон остановлен.'); break; }
       const prompt = step === 0 ? text : 'Результаты инструментов:\n' + results;
       const msg = { role: 'assistant', content: '', reasoning: '' };
       state.messages.push(msg);
       const view = appendStreamingMessage(msg);
-      const out = await streamReply(view, prompt, { agent: true, hidden: step > 0, agentStep: step > 0 });
+      let out = '';
+      try {
+        out = await streamReply(view, prompt, { agent: true, hidden: step > 0, agentStep: step > 0 });
+      } catch (e) {
+        agentNote('Связь с сервером прервалась: ' + (e.message || 'ошибка'));
+        break;
+      }
       const calls = extractToolCalls(out);
       if (!calls.length) { finalSeen = true; break; }
       // Та же пачка вызовов второй раз подряд: результат уже есть, добиваем финальным ответом.
@@ -1497,15 +1591,15 @@ async function agentRun(text) {
           + (err ? 'ОШИБКА: ' + err : summarizeToolResult(call, res)) + '\n\n';
       }
     }
-    if (!finalSeen) {
+    if (!finalSeen && state.currentId === chatId) {
       // Гарантированный финал: один запрос без права вызывать инструменты.
       const tail = { role: 'assistant', content: '', reasoning: '' };
       state.messages.push(tail);
       const tailView = appendStreamingMessage(tail);
       try {
-        await streamReply(tailView, 'Инструменты больше не вызывай, это финальный шаг. Результаты инструментов:\n' + (results || '(нет)') + '\n\nОтветь пользователю по-русски: что сделано и что получилось. Блоков photonn-tool быть не должно.', { agent: true, hidden: true, agentStep: true });
+        await streamReply(tailView, 'ФИНАЛЬНЫЙ ШАГ. Инструменты недоступны и вызывать их нельзя. Ниже результаты инструментов.\n' + (results || '(нет)') + '\n\nОтветь пользователю по-русски обычным текстом: что сделано, какие файлы изменены, что проверено. Если действие не выполнено или отклонено — скажи прямо. Не выдумывай успех, не вставляй блоки photonn-tool и JSON.', { agent: true, hidden: true, agentStep: true });
         finalSeen = true;
-      } catch (e) {}
+      } catch (e) { agentNote('Не удалось получить финальный ответ: ' + (e.message || 'ошибка')); }
     }
   } finally {
     agent.busy = false;
@@ -2126,6 +2220,9 @@ function openInstall() {
 try { initTools(); } catch (e) { console.warn('initTools:', e); }
 
 async function newChat(silent) {
+  if (agent.busy) { toast('Агент ещё работает — дождись ответа'); return null; }
+  cancelAgentConfirm();
+  agent.autoApprove = false;
   try {
     const r = await fetch('/api/chats', { method: 'POST' });
     const j = await r.json();
@@ -2144,6 +2241,9 @@ async function newChat(silent) {
 }
 
 async function openChat(id) {
+  if (agent.busy) { toast('Агент ещё работает — дождись ответа'); return; }
+  cancelAgentConfirm();
+  agent.autoApprove = false;
   const r = await fetch('/api/chats/' + id);
   if (!r.ok) {
     const j = await r.json().catch(() => null);
@@ -2409,6 +2509,12 @@ on('mNew', () => newChat(false));
   on('agentSetup', openAgentModal);
   on('agentOff', () => { agent.on = false; saveAgent(); applyAgentUI(); });
   on('agentConnect', connectAgent);
+  const agentCodeInput = $('agentCode');
+  if (agentCodeInput) {
+    agentCodeInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); connectAgent(); }
+    });
+  }
   on('agentMcpReload', async () => {
     const b = $('agentMcpReload');
     if (!agent.connected) { toast('Сначала подключи мост агента'); return; }

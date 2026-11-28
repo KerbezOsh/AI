@@ -10,7 +10,7 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const crypto = require('crypto');
-const { exec, spawn } = require('child_process');
+const { exec, spawn, execFileSync } = require('child_process');
 
 const VERSION = '1.0.0';
 const MAX_BODY = 4 * 1024 * 1024;
@@ -31,19 +31,53 @@ if (flag('help')) {
   console.log('');
   console.log('  --root <папка>   что агент имеет право читать и менять (по умолчанию ./photonn-workspace)');
   console.log('  --port <n>       порт на 127.0.0.1, по умолчанию 8787');
-  console.log('  --token <строка> свой токен; иначе случайный, печатается при старте');
+  console.log('  --token <строка> свой токен; иначе сохраняется в рабочей папке и переживает перезапуск');
+  console.log('  --pair <код>     свой код подключения; иначе случайный, печатается при старте');
   console.log('  --allow-exec     разрешить выполнение команд (по умолчанию выключено)');
   console.log('  --mcp <файл>     конфиг MCP-серверов (по умолчанию photonn-mcp.json в рабочей папке)');
+  console.log('');
+  console.log('  Обычный запуск: двойной клик по start-agent.cmd — код подключения будет в окне.');
   process.exit(0);
 }
 
 const PORT = Number(arg('port', process.env.AGENT_PORT || 8787));
-const TOKEN = arg('token', crypto.randomBytes(16).toString('hex'));
 const ALLOW_EXEC = flag('allow-exec');
 let ROOT = path.resolve(arg('root', process.env.AGENT_ROOT || path.join(process.cwd(), 'photonn-workspace')));
 
 fs.mkdirSync(ROOT, { recursive: true });
 const BACKUP_DIR = path.join(ROOT, '.photonn-agent', 'backups');
+
+// Токен переживает перезапуск: иначе после каждого старта сайт пришлось бы подключать заново.
+function loadToken() {
+  const fixed = arg('token', '');
+  if (fixed) return fixed;
+  const file = path.join(ROOT, '.photonn-agent', 'token');
+  try {
+    const saved = fs.readFileSync(file, 'utf8').trim();
+    if (saved.length >= 24) return saved;
+  } catch (e) {}
+  const token = crypto.randomBytes(16).toString('hex');
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, token, { mode: 0o600 });
+  } catch (e) {}
+  return token;
+}
+const TOKEN = loadToken();
+
+// Код подключения: короткий, одноразовый, живёт только этот запуск моста.
+const PAIR_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function makePairCode() {
+  const b = crypto.randomBytes(6);
+  let s = '';
+  for (let i = 0; i < 6; i++) s += PAIR_ALPHABET[b[i] % PAIR_ALPHABET.length];
+  return s.slice(0, 3) + '-' + s.slice(3);
+}
+const PAIR_FIXED = String(arg('pair', '')).toUpperCase().replace(/[^A-Z0-9]/g, '');
+let PAIR_CODE = PAIR_FIXED || makePairCode();
+let PAIR_USED = false;
+let pairFails = 0;
+let pairLockUntil = 0;
 
 function sameToken(given) {
   const a = Buffer.from(String(given || ''));
@@ -177,6 +211,13 @@ class StdioMcp {
   }
   onData(chunk) {
     this.buf += chunk.toString('utf8');
+    if (this.buf.length > 8 * 1024 * 1024) {
+      this.buf = '';
+      for (const p of this.pending.values()) p.reject(new Error('MCP-сервер прислал слишком большой ответ'));
+      this.pending.clear();
+      killTree(this.proc);
+      return;
+    }
     let cut;
     while ((cut = this.buf.indexOf('\n')) >= 0) {
       const line = this.buf.slice(0, cut).trim();
@@ -258,7 +299,7 @@ class StdioMcp {
     const r = await this.request('tools/call', { name: name, arguments: args || {} }, 120000);
     return mcpResult(r);
   }
-  stop() { try { this.proc.kill(); } catch (e) {} }
+  stop() { killTree(this.proc); }
 }
 
 class HttpMcp {
@@ -287,6 +328,7 @@ class HttpMcp {
         body: JSON.stringify({ jsonrpc: '2.0', id: id, method: method, params: params || {} }),
         signal: ctrl.signal
       });
+      if (!r.ok) throw new Error('MCP HTTP ' + r.status + ' ' + (r.statusText || ''));
       const sid = r.headers.get('mcp-session-id');
       if (sid) this.sessionId = sid;
       const ct = String(r.headers.get('content-type') || '');
@@ -338,7 +380,14 @@ class HttpMcp {
   stop() {}
 }
 
-async function loadMcpServers() {
+// Последовательные перезагрузки: иначе два reload подряд могут поднять серверы дважды.
+let mcpLoading = Promise.resolve();
+function loadMcpServers() {
+  mcpLoading = mcpLoading.then(loadMcpServersNow, loadMcpServersNow);
+  return mcpLoading;
+}
+
+async function loadMcpServersNow() {
   for (const s of MCP.servers.values()) { try { s.stop(); } catch (e) {} }
   MCP.servers.clear();
   MCP.tools = [];
@@ -350,18 +399,20 @@ async function loadMcpServers() {
   try { cfg = JSON.parse(fs.readFileSync(file, 'utf8')); }
   catch (e) { MCP.errors.push('photonn-mcp.json: ' + e.message); return; }
   const list = cfg && cfg.mcpServers && typeof cfg.mcpServers === 'object' ? cfg.mcpServers : {};
-  for (const name of Object.keys(list)) {
+  const safe = (s) => String(s).replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'mcp';
+  for (const name of Object.keys(list).slice(0, 20)) {
     const sc = list[name] || {};
     try {
       const client = sc.url ? new HttpMcp(name, sc) : sc.command ? new StdioMcp(name, sc) : null;
       if (!client) throw new Error('нужен command или url');
       const tools = await client.start();
       MCP.servers.set(name, client);
-      for (const t of tools) {
+      const prefix = safe(name);
+      for (const t of tools.slice(0, 200)) {
         if (!t || !t.name) continue;
         MCP.tools.push({
           server: name,
-          name: name + '__' + String(t.name),
+          name: prefix + '__' + safe(t.name),
           orig: String(t.name),
           description: String(t.description || '').slice(0, 600),
           inputSchema: t.inputSchema || null
@@ -397,6 +448,16 @@ function doMcp(args) {
 
 const TOOLS = { list: doList, read: doRead, write: doWrite, patch: doPatch, exec: doExec, mcp: doMcp };
 
+// Убиваем всё дерево: на Windows shell-обёртка оставляет дочерний процесс жить.
+function killTree(proc) {
+  if (!proc || proc.killed || !proc.pid) return;
+  if (process.platform === 'win32') {
+    try { execFileSync('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore' }); } catch (e) {}
+    return;
+  }
+  try { proc.kill('SIGTERM'); } catch (e) {}
+}
+
 function send(res, status, obj) {
   const body = JSON.stringify(obj);
   res.writeHead(status, {
@@ -430,11 +491,38 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Agent-Token');
   res.setHeader('Access-Control-Max-Age', '600');
+  // Chrome спрашивает разрешение на запрос к 127.0.0.1 с публичного сайта (Private Network Access).
+  res.setHeader('Access-Control-Allow-Private-Network', 'true');
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
+
+  // Защита от DNS rebinding: мост отвечает только на своё имя.
+  const host = String(req.headers.host || '');
+  if (host && !/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(host)) {
+    return send(res, 403, { ok: false, error: 'мост принимает запросы только на 127.0.0.1' });
+  }
 
   const url = new URL(req.url, 'http://127.0.0.1');
 
-  if (url.pathname === '/health') return send(res, 200, { ok: true, version: VERSION, allowExec: ALLOW_EXEC });
+  if (url.pathname === '/health') return send(res, 200, { ok: true, version: VERSION, allowExec: ALLOW_EXEC, pairAvailable: !PAIR_USED });
+
+  // Подключение по короткому коду: токен отдаётся один раз и только за правильный код.
+  if (url.pathname === '/pair' && req.method === 'POST') {
+    if (Date.now() < pairLockUntil) return send(res, 429, { ok: false, error: 'слишком много попыток — подожди 10 минут' });
+    let body;
+    try { body = await readBody(req); } catch (e) { return send(res, 400, { ok: false, error: e.message }); }
+    const got = String(body.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const want = PAIR_CODE.replace(/[^A-Z0-9]/g, '');
+    const ok = !PAIR_USED && got.length > 0 && got.length === want.length && crypto.timingSafeEqual(Buffer.from(got), Buffer.from(want));
+    if (!ok) {
+      pairFails++;
+      if (pairFails >= 10) { pairLockUntil = Date.now() + 10 * 60000; pairFails = 0; }
+      return send(res, 403, { ok: false, error: PAIR_USED ? 'код уже использован — перезапусти мост' : 'код не подошёл' });
+    }
+    PAIR_USED = true;
+    PAIR_CODE = '';
+    console.log('[агент] сайт подключён по коду');
+    return send(res, 200, { ok: true, token: TOKEN, root: ROOT, allowExec: ALLOW_EXEC });
+  }
 
   if (!sameToken(req.headers['x-agent-token'])) {
     return send(res, 401, { ok: false, error: 'неверный токен агента' });
@@ -487,8 +575,15 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log('  команды       : ' + (ALLOW_EXEC ? 'разрешены' : 'выключены (--allow-exec чтобы включить)'));
   console.log('  адрес         : http://127.0.0.1:' + PORT);
   console.log('');
-  console.log('  ТОКЕН (вставь в окно «Агент» на сайте):');
-  console.log('  ' + TOKEN);
+  const code = PAIR_CODE || '(код уже использован)';
+  const line = '  КОД ПОДКЛЮЧЕНИЯ:  ' + code;
+  console.log('  ' + '-'.repeat(line.length));
+  console.log(line);
+  console.log('  ' + '-'.repeat(line.length));
+  console.log('');
+  console.log('  Открой сайт photonnAI → кнопка «Агент» → введи этот код.');
+  console.log('  Код одноразовый; токен сохраняется в папке и переживает перезапуск.');
+  console.log('  Токен для ручного режима: ' + TOKEN);
   console.log('');
   console.log('  Остановить: Ctrl+C. Мост слушает только этот компьютер.');
   loadMcpServers().then(() => {

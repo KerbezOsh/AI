@@ -834,7 +834,8 @@ function messageNode(msg, question) {
 
 function welcomeNode() {
   const w = el('div', 'welcome');
-  w.appendChild(el('h1', null, 'С чего начнём?'));
+  const dict = I18N[uiLang] || I18N.ru;
+  w.appendChild(el('h1', null, dict.welcome || 'С чего начнём?'));
 
   if (!state.hasKey) {
     const p = el('p', 'hint', 'Один раз вставь API-ключ NVIDIA — дальше всё работает само.');
@@ -853,10 +854,10 @@ function welcomeNode() {
 
   const cards = el('div', 'welcome-cards');
   [
-    ['✎', 'Написать текст', 'Письмо клиенту о задержке, вежливо и коротко'],
-    ['◇', 'Разобрать задачу', 'План подготовки к экзамену на 5 дней'],
-    ['⌘', 'Объяснить код', 'Что делает эта функция и где в ней ошибка'],
-    ['🌐', 'Сравнить и решить', 'Два подхода к задаче: плюсы, минусы, вывод']
+    ['✎', dict.w1, 'Письмо клиенту о задержке, вежливо и коротко'],
+    ['◇', dict.w2, 'План подготовки к экзамену на 5 дней'],
+    ['⌘', dict.w3, 'Что делает эта функция и где в ней ошибка'],
+    ['🌐', dict.w4, 'Два подхода к задаче: плюсы, минусы, вывод']
   ].forEach(([ico, title, prompt]) => {
     const card = document.createElement('button');
     card.type = 'button';
@@ -2906,8 +2907,8 @@ init();
 
 // ── Язык интерфейса ───────────────────────────────────────────────
 const I18N = {
-  ru: { newChat: 'Новый чат', history: 'История', settings: 'Настройки', export: 'Экспорт чатов', ask: 'Спросить photonnAI' },
-  en: { newChat: 'New chat', history: 'History', settings: 'Settings', export: 'Export chats', ask: 'Ask photonnAI' }
+  ru: { newChat: 'Новый чат', history: 'История', settings: 'Настройки', export: 'Экспорт чатов', ask: 'Спросить photonnAI', settingsTitle: 'Настройки', settingsSub: 'Сохраняются на этом устройстве', theme: 'Тема', dark: 'Тёмная', light: 'Светлая', system: 'Как в системе', fontSize: 'Размер текста', sm: 'Мелкий', md: 'Обычный', lg: 'Крупный', ansStyle: 'Стиль ответа', normal: 'Обычный', brief: 'Коротко', detailed: 'Подробно', beginner: 'Для новичка', expert: 'Как эксперт', behavior: 'Поведение', reset: 'Сбросить', done: 'Готово', q1: 'Объясни проще', q2: 'Дай пример', q3: 'По шагам', q4: 'Итог', q5: 'Ошибки', camera: 'Камера', web: 'Веб-поиск', deep: 'Размышления', agent: 'Агент', welcome: 'С чего начнём?', w1: 'Написать текст', w2: 'Разобрать задачу', w3: 'Объяснить код', w4: 'Сравнить и решить' },
+  en: { newChat: 'New chat', history: 'History', settings: 'Settings', export: 'Export chats', ask: 'Ask photonnAI', settingsTitle: 'Settings', settingsSub: 'Stored on this device', theme: 'Theme', dark: 'Dark', light: 'Light', system: 'As system', fontSize: 'Text size', sm: 'Small', md: 'Normal', lg: 'Large', ansStyle: 'Answer style', normal: 'Normal', brief: 'Brief', detailed: 'Detailed', beginner: 'Beginner', expert: 'Expert', behavior: 'Behavior', reset: 'Reset', done: 'Done', q1: 'Simplify', q2: 'Give example', q3: 'Step by step', q4: 'Summary', q5: 'Pitfalls', camera: 'Camera', web: 'Web search', deep: 'Thinking', agent: 'Agent', welcome: 'What shall we start with?', w1: 'Write text', w2: 'Break down task', w3: 'Explain code', w4: 'Compare & decide' }
 };
 let uiLang = 'ru';
 function applyLang() {
@@ -2917,6 +2918,7 @@ function applyLang() {
   document.querySelectorAll('[data-i18n-ph]').forEach((n) => { const k = n.dataset.i18nPh; if (dict[k]) n.placeholder = dict[k]; });
   const lbl = $('langLabel');
   if (lbl) lbl.textContent = uiLang === 'ru' ? 'EN' : 'RU';
+  if (typeof renderMessages === 'function' && state && Array.isArray(state.messages) && !state.messages.length) renderMessages();
 }
 async function detectLang(geoCountry) {
   try {
@@ -2944,8 +2946,9 @@ async function loadOffers() {
     const box = $('offerBanner');
     if (box && j && Array.isArray(j.offers) && j.offers.length) {
       const o = j.offers[0];
+      const disc = Number(o.discount) > 0 ? ' −' + o.discount + '%' : '';
       box.classList.remove('hidden');
-      $('offerText').textContent = (uiLang === 'en' ? 'Special offer: ' : 'Спецпредложение: ') + o.plan.toUpperCase() + ' ' + o.days + 'd';
+      $('offerText').textContent = ((uiLang === 'en' ? 'Special offer: ' : 'Спецпредложение: ') + o.plan.toUpperCase() + ' ' + o.days + 'd' + disc + ' · ' + o.code);
     }
   } catch (e) {}
 }

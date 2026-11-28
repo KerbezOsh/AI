@@ -1204,6 +1204,12 @@ body.ads-off .app { height: 100dvh; }
   #input { font-size: 16px; }
   html { -webkit-text-size-adjust: 100%; }
   .content a { overflow-wrap: anywhere; }
+  .quick-chips, .composer-extras { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 2px; }
+  .quick-chips::-webkit-scrollbar, .composer-extras::-webkit-scrollbar { display: none; }
+  .chip { flex: 0 0 auto; }
+  .offer-banner { font-size: 12px; padding: 8px 9px; }
+  .palette-back { padding: 8vh 10px 10px; }
+  .modal { max-height: 88dvh; overflow-y: auto; }
 }
 
 @media (max-width: 380px) {

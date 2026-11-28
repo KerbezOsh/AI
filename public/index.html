@@ -10,7 +10,7 @@
 <link rel='apple-touch-icon' href='/icon-192.png'>
 <meta name='apple-mobile-web-app-capable' content='yes'>
 <meta name='apple-mobile-web-app-title' content='photonnAI'>
-<link rel='stylesheet' href='/style.css?v=36'>
+<link rel='stylesheet' href='/style.css?v=37'>
 <script>
   // Тему ставим до первой отрисовки, иначе при светлой теме экран мигает чёрным.
   try {
@@ -115,42 +115,42 @@
       <button class='modal-x' id='settingsClose' title='Закрыть'>✕</button>
       <div class='settings-head'>
         <div>
-          <h3>Настройки</h3>
-          <p>Сохраняются на этом устройстве</p>
+          <h3 data-i18n='settingsTitle'>Настройки</h3>
+          <p data-i18n='settingsSub'>Сохраняются на этом устройстве</p>
         </div>
       </div>
 
       <div class='settings-group'>
-        <div class='settings-label'>Тема</div>
+        <div class='settings-label' data-i18n='theme'>Тема</div>
         <div class='seg' id='segTheme'>
-          <button data-theme='dark'>Тёмная</button>
-          <button data-theme='light'>Светлая</button>
-          <button data-theme='system'>Как в системе</button>
+          <button data-theme='dark' data-i18n='dark'>Тёмная</button>
+          <button data-theme='light' data-i18n='light'>Светлая</button>
+          <button data-theme='system' data-i18n='system'>Как в системе</button>
         </div>
       </div>
 
       <div class='settings-group'>
-        <div class='settings-label'>Размер текста</div>
+        <div class='settings-label' data-i18n='fontSize'>Размер текста</div>
         <div class='seg' id='segSize'>
-          <button data-size='sm'>Мелкий</button>
-          <button data-size='md'>Обычный</button>
-          <button data-size='lg'>Крупный</button>
+          <button data-size='sm' data-i18n='sm'>Мелкий</button>
+          <button data-size='md' data-i18n='md'>Обычный</button>
+          <button data-size='lg' data-i18n='lg'>Крупный</button>
         </div>
       </div>
 
       <div class='settings-group'>
-        <div class='settings-label'>Стиль ответа</div>
+        <div class='settings-label' data-i18n='ansStyle'>Стиль ответа</div>
         <div class='seg wrap' id='segStyle'>
-          <button data-style='normal'>Обычный</button>
-          <button data-style='brief'>Коротко</button>
-          <button data-style='detailed'>Подробно</button>
-          <button data-style='beginner'>Для новичка</button>
-          <button data-style='expert'>Как эксперт</button>
+          <button data-style='normal' data-i18n='normal'>Обычный</button>
+          <button data-style='brief' data-i18n='brief'>Коротко</button>
+          <button data-style='detailed' data-i18n='detailed'>Подробно</button>
+          <button data-style='beginner' data-i18n='beginner'>Для новичка</button>
+          <button data-style='expert' data-i18n='expert'>Как эксперт</button>
         </div>
       </div>
 
       <div class='settings-group'>
-        <div class='settings-label'>Поведение</div>
+        <div class='settings-label' data-i18n='behavior'>Поведение</div>
         <label class='switch-row'><span>Enter отправляет сообщение<small>Shift+Enter — перенос строки</small></span>
           <span class='switch'><input type='checkbox' id='optEnter'><i></i></span></label>
         <label class='switch-row'><span>Показывать модель под ответом<small>Метка Flash / Pro / Reasoning</small></span>
@@ -160,8 +160,8 @@
       </div>
 
       <div class='settings-actions'>
-        <button class='secondary' id='settingsReset'>Сбросить</button>
-        <button class='primary' id='settingsDone'>Готово</button>
+        <button class='secondary' id='settingsReset' data-i18n='reset'>Сбросить</button>
+        <button class='primary' id='settingsDone' data-i18n='done'>Готово</button>
       </div>
     </div>
   </div>
@@ -306,17 +306,17 @@
           <button class='stop' id='stop' hidden title='Остановить'>■</button>
         </div>
         <div class='quick-chips' id='quickChips'>
-          <button class='chip quick' data-prompt='Объясни проще: '>Объясни проще</button>
-          <button class='chip quick' data-prompt='Дай конкретный пример: '>Дай пример</button>
-          <button class='chip quick' data-prompt='Разбери по шагам: '>По шагам</button>
-          <button class='chip quick' data-prompt='Краткий итог: '>Итог</button>
-          <button class='chip quick' data-prompt='Какие бывают ошибки и как их избежать? '>Ошибки</button>
+          <button class='chip quick' data-prompt='Объясни проще: ' data-i18n='q1'>Объясни проще</button>
+          <button class='chip quick' data-prompt='Дай конкретный пример: ' data-i18n='q2'>Дай пример</button>
+          <button class='chip quick' data-prompt='Разбери по шагам: ' data-i18n='q3'>По шагам</button>
+          <button class='chip quick' data-prompt='Краткий итог: ' data-i18n='q4'>Итог</button>
+          <button class='chip quick' data-prompt='Какие бывают ошибки и как их избежать? ' data-i18n='q5'>Ошибки</button>
         </div>
         <div class='composer-extras'>
-          <button class='chip' id='btnCamera' title='Сфотографировать и отправить'>📷 Камера</button>
-          <button class='chip' id='btnWeb' title='Веб-поиск: модель найдёт свежие данные'>🌐 Веб-поиск</button>
-          <button class='chip' id='btnDeep' title='Глубокое размышление: максимум рассуждений'>🧠 Размышления</button>
-          <button class='chip' id='btnAgent' title='Агент: доступ к файлам на компьютере'>🖥 Агент</button>
+          <button class='chip' id='btnCamera' title='Сфотографировать и отправить'>📷 <span data-i18n='camera'>Камера</span></button>
+          <button class='chip' id='btnWeb' title='Веб-поиск: модель найдёт свежие данные'>🌐 <span data-i18n='web'>Веб-поиск</span></button>
+          <button class='chip' id='btnDeep' title='Глубокое размышление: максимум рассуждений'>🧠 <span data-i18n='deep'>Размышления</span></button>
+          <button class='chip' id='btnAgent' title='Агент: доступ к файлам на компьютере'>🖥 <span data-i18n='agent'>Агент</span></button>
         </div>
         <div class='composer-hint'><button class='plan-meter' id='planMeter' type='button' title='Тариф и дневной лимит'>Free · 0 / 18</button><span class='hint-dot'>·</span>photonnAI может ошибаться. Проверяйте важные факты.</div>
       </div>
@@ -344,7 +344,7 @@
 (function () {
   if ('caches' in window) {
     caches.keys().then(function (ks) {
-      ks.forEach(function (k) { if (k.indexOf('photonn-v36') !== 0) caches.delete(k); });
+      ks.forEach(function (k) { if (k.indexOf('photonn-v37') !== 0) caches.delete(k); });
     }).catch(function () {});
   }
   if ('serviceWorker' in navigator) {
@@ -354,6 +354,6 @@
   }
 })();
 </script>
-<script src='/app.js?v=36'></script>
+<script src='/app.js?v=37'></script>
 </body>
 </html>

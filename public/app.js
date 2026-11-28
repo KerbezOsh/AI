@@ -763,7 +763,13 @@ function messageNode(msg, question) {
   row.appendChild(avatar(msg.role));
   const bubble = el('div', 'bubble');
 
-  const parsed = msg.role === 'assistant' ? splitThinking(msg.content, msg.reasoning) : { content: msg.content, reasoning: '' };
+  const versions = msg.role === 'assistant' && Array.isArray(msg.variants) && msg.variants.length
+    ? [...msg.variants, { content: msg.content, at: msg.at, model: msg.model, tier: msg.tier }]
+    : null;
+  const versionIndex = versions ? Math.min(Math.max(Number(msg.variantIndex ?? versions.length - 1), 0), versions.length - 1) : 0;
+  const displayMsg = versions ? Object.assign({}, msg, { content: versions[versionIndex].content, tier: versions[versionIndex].tier || msg.tier, model: versions[versionIndex].model || msg.model }) : msg;
+  if (versions) { displayMsg.__original = msg; displayMsg.__versionIndex = versionIndex; displayMsg.__versionCount = versions.length; }
+  const parsed = displayMsg.role === 'assistant' ? splitThinking(displayMsg.content, displayMsg.reasoning) : { content: displayMsg.content, reasoning: '' };
   if (msg.role === 'assistant' && /```photonn-tool|^\s*`{0,3}\s*photonn-tool\s*`{0,3}\s*$/m.test(String(parsed.content || ''))) {
     parsed.content = stripToolCalls(parsed.content) || '_Агент выполнял действия с файлами._';
   }
@@ -793,10 +799,10 @@ function messageNode(msg, question) {
   bubble.appendChild(content);
 
   if (msg.role === 'assistant' && parsed.content) {
-    bubble.appendChild(el('div', 'model-tag', tierLabel(msg.tier || 'pro') + (msg.fallback ? ' · резерв' : '')));
+    bubble.appendChild(el('div', 'model-tag', tierLabel(displayMsg.tier || 'pro') + (msg.fallback ? ' · резерв' : '')));
   }
 
-  if (msg.role === 'assistant' && parsed.content) addActions(bubble, msg, question);
+  if (msg.role === 'assistant' && parsed.content) addActions(bubble, displayMsg, question);
 
   row.appendChild(bubble);
   return row;
@@ -2405,7 +2411,7 @@ function openPalette() {
   renderPalette('');
   setTimeout(() => p.input.focus(), 0);
 }
-function renderPalette(query) {
+async function renderPalette(query) {
   const p = buildPalette();
   const q = String(query || '').trim().toLowerCase();
   p.list.innerHTML = '';
@@ -2418,9 +2424,27 @@ function renderPalette(query) {
   const chats = state.chats
     .filter((c) => !q || String(c.title || '').toLowerCase().includes(q))
     .slice(0, 20);
-  if (!actions.length && !chats.length) {
+  let searchResults = [];
+  if (q.length >= 2) {
+    try {
+      const j = await (await fetch('/api/search?q=' + encodeURIComponent(q))).json();
+      searchResults = Array.isArray(j.results) ? j.results.slice(0, 12) : [];
+    } catch (e) {}
+  }
+  if (!actions.length && !chats.length && !searchResults.length) {
     p.list.appendChild(el('div', 'palette-empty', 'Ничего не найдено'));
     return;
+  }
+  if (searchResults.length) {
+    p.list.appendChild(el('div', 'palette-group', 'По всем чатам'));
+    for (const r of searchResults) {
+      const item = el('button', 'palette-item');
+      item.type = 'button';
+      const label = (r.title || 'Без названия') + (r.snippet ? ' — ' + r.snippet : '');
+      item.append(el('span', '', label), el('small', '', r.role || 'чат'));
+      item.onclick = () => { closePalette(); openChat(r.chatId); };
+      p.list.appendChild(item);
+    }
   }
   if (chats.length) {
     p.list.appendChild(el('div', 'palette-group', 'Чаты'));
@@ -2494,8 +2518,25 @@ function addActions(bubble, msg, question) {
   copy.onclick = () => { navigator.clipboard.writeText(msg.content); toast('Скопировано'); };
   actions.appendChild(copy);
 
+  const origMsg = msg.__original || msg;
+  if (msg.__versionCount > 1) {
+    const prev = el('button', 'mini', '‹');
+    const label = el('span', 'mini', (msg.__versionIndex + 1) + '/' + msg.__versionCount);
+    const next = el('button', 'mini', '›');
+    const step = (d) => {
+      const total = Array.isArray(origMsg.variants) ? origMsg.variants.length + 1 : 1;
+      origMsg.variantIndex = Math.min(Math.max((origMsg.variantIndex ?? total - 1) + d, 0), total - 1);
+      renderMessages();
+    };
+    prev.disabled = msg.__versionIndex <= 0;
+    next.disabled = msg.__versionIndex >= msg.__versionCount - 1;
+    prev.onclick = () => step(-1);
+    next.onclick = () => step(1);
+    actions.append(prev, label, next);
+  }
+
   // «Ещё раз» — только у последнего ответа: сервер заменяет его, а не добавляет новый.
-  const isLast = state.messages[state.messages.length - 1] === msg;
+  const isLast = state.messages[state.messages.length - 1] === origMsg;
   if (msg.role === 'assistant' && isLast) {
     const again = el('button', 'mini', 'Ещё раз');
     again.title = 'Сгенерировать ответ заново';

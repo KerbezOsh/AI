@@ -10,7 +10,7 @@
 <link rel='apple-touch-icon' href='/icon-192.png'>
 <meta name='apple-mobile-web-app-capable' content='yes'>
 <meta name='apple-mobile-web-app-title' content='photonnAI'>
-<link rel='stylesheet' href='/style.css?v=31'>
+<link rel='stylesheet' href='/style.css?v=32'>
 <script>
   // Тему ставим до первой отрисовки, иначе при светлой теме экран мигает чёрным.
   try {
@@ -55,6 +55,7 @@
     <div class='chat-list' id='chatList'></div>
     <div class='sidebar-foot'>
       <button class='side-settings' id='sideSettings'><span class='ico'>⚙</span> Настройки</button>
+      <button class='side-settings' id='exportChats'><span class='ico'>⇩</span> Экспорт чатов</button>
       <a class='side-settings discord-link' href='https://discord.gg/ffqbEcWG7' target='_blank' rel='noopener'><span class='ico'>◉</span> Discord-канал</a>
       <div class='key-state' id='learnState'>Оценок: 0 · фактов: 0</div>
     </div>
@@ -322,7 +323,7 @@
 (function () {
   if ('caches' in window) {
     caches.keys().then(function (ks) {
-      ks.forEach(function (k) { if (k.indexOf('photonn-v31') !== 0) caches.delete(k); });
+      ks.forEach(function (k) { if (k.indexOf('photonn-v32') !== 0) caches.delete(k); });
     }).catch(function () {});
   }
   if ('serviceWorker' in navigator) {
@@ -332,6 +333,6 @@
   }
 })();
 </script>
-<script src='/app.js?v=31'></script>
+<script src='/app.js?v=32'></script>
 </body>
 </html>

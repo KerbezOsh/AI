@@ -2351,6 +2351,99 @@ function renderChatList() {
   }
 }
 
+async function exportChats() {
+  try {
+    const r = await fetch('/api/chats/export');
+    if (!r.ok) throw new Error('export failed');
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'photonn-chats.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast('Чаты экспортированы');
+  } catch (e) {
+    toast('Не удалось экспортировать чаты');
+  }
+}
+
+let palette = null;
+function buildPalette() {
+  if (palette) return palette;
+  const back = el('div', 'palette-back hidden');
+  const box = el('div', 'palette');
+  const input = el('input', 'palette-input');
+  input.type = 'text';
+  input.placeholder = 'Поиск чатов и действий…';
+  input.setAttribute('aria-label', 'Поиск чатов и действий');
+  const list = el('div', 'palette-list');
+  box.append(input, list);
+  back.appendChild(box);
+  document.body.appendChild(back);
+  palette = { back, input, list };
+  back.addEventListener('click', (e) => { if (e.target === back) closePalette(); });
+  input.addEventListener('input', () => renderPalette(input.value));
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closePalette();
+    if (e.key === 'Enter') {
+      const first = list.querySelector('.palette-item');
+      if (first) first.click();
+    }
+  });
+  return palette;
+}
+function closePalette() {
+  if (palette) palette.back.classList.add('hidden');
+}
+function openPalette() {
+  const p = buildPalette();
+  p.back.classList.remove('hidden');
+  p.input.value = '';
+  renderPalette('');
+  setTimeout(() => p.input.focus(), 0);
+}
+function renderPalette(query) {
+  const p = buildPalette();
+  const q = String(query || '').trim().toLowerCase();
+  p.list.innerHTML = '';
+  const actions = [
+    { name: 'Новый чат', hint: 'действие', run: () => newChat(false) },
+    { name: 'Открыть настройки', hint: 'действие', run: () => openSettings() },
+    { name: 'Экспорт чатов', hint: 'действие', run: () => exportChats() },
+    { name: 'Открыть историю', hint: 'действие', run: () => document.body.classList.add('side-open') }
+  ].filter((a) => !q || a.name.toLowerCase().includes(q));
+  const chats = state.chats
+    .filter((c) => !q || String(c.title || '').toLowerCase().includes(q))
+    .slice(0, 20);
+  if (!actions.length && !chats.length) {
+    p.list.appendChild(el('div', 'palette-empty', 'Ничего не найдено'));
+    return;
+  }
+  if (chats.length) {
+    p.list.appendChild(el('div', 'palette-group', 'Чаты'));
+    for (const c of chats) {
+      const item = el('button', 'palette-item');
+      item.type = 'button';
+      item.append(el('span', '', c.title || 'Без названия'), el('small', '', 'открыть'));
+      item.onclick = () => { closePalette(); openChat(c.id); };
+      p.list.appendChild(item);
+    }
+  }
+  if (actions.length) {
+    p.list.appendChild(el('div', 'palette-group', 'Действия'));
+    for (const a of actions) {
+      const item = el('button', 'palette-item', a.name);
+      item.type = 'button';
+      item.appendChild(el('small', '', a.hint));
+      item.onclick = () => { closePalette(); a.run(); };
+      p.list.appendChild(item);
+    }
+  }
+}
+
 function renderTierSelect() {
   const mode = currentMode();
   const plan = (state.plan && state.plan.id) || 'free';
@@ -2556,6 +2649,7 @@ on('mNew', () => newChat(false));
   // Настройки интерфейса
   on('btnSettings', openSettings);
   on('sideSettings', openSettings);
+  on('exportChats', exportChats);
   on('settingsClose', closeSettings);
   on('settingsDone', closeSettings);
   tap('settingsModal', 'click', (e) => { if (e.target.id === 'settingsModal') closeSettings(); });
@@ -2576,7 +2670,13 @@ on('mNew', () => newChat(false));
   tap('optCompact', 'change', (e) => { ui.compact = e.target.checked; saveUi(); applyUi(); });
   on('settingsReset', () => { Object.assign(ui, UI_DEFAULT); saveUi(); applyUi(); toast('Настройки сброшены'); });
   document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      openPalette();
+      return;
+    }
     if (e.key !== 'Escape') return;
+    closePalette();
     if (!$('agentConfirm').classList.contains('hidden')) {
       const d = $('agentDeny');
       if (d && d.onclick) d.onclick();

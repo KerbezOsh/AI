@@ -753,6 +753,32 @@ body.is-streaming .composer-box {
 body.is-streaming .stop, body.is-streaming .avatar.assistant { animation: pulse-ring 1.1s ease-in-out infinite; }
 body.is-streaming .send { box-shadow: 0 3px 18px rgba(123, 162, 255, 0.44); }
 
+/* ---------- палитра Ctrl+K ---------- */
+.palette-back {
+  position: fixed; inset: 0; z-index: 120; display: grid; place-items: start center;
+  padding: 12vh 16px 16px; background: rgba(4, 5, 8, 0.62); backdrop-filter: blur(6px);
+  animation: fade-in 0.16s ease both;
+}
+.palette {
+  width: min(560px, 100%); background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-xl); box-shadow: var(--shadow); overflow: hidden;
+  animation: pop-in 0.18s ease both;
+}
+.palette-input {
+  width: 100%; border: none; outline: none; background: transparent; color: var(--text);
+  padding: 16px 18px; font-size: 15px; border-bottom: 1px solid var(--line-soft);
+}
+.palette-list { max-height: min(420px, 60vh); overflow-y: auto; padding: 8px; }
+.palette-group { padding: 8px 10px 4px; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); }
+.palette-item {
+  width: 100%; display: flex; align-items: center; gap: 10px; text-align: left;
+  background: transparent; border: none; border-radius: var(--r-sm); color: var(--text-2);
+  padding: 10px 11px; font-size: 13.5px; transition: background 0.12s, color 0.12s;
+}
+.palette-item:hover, .palette-item.active { background: var(--surface-2); color: var(--text); }
+.palette-item small { margin-left: auto; color: var(--text-3); font-size: 11px; }
+.palette-empty { padding: 18px; color: var(--text-3); text-align: center; font-size: 13px; }
+
 /* ---------- прокрутка ---------- */
 .messages::-webkit-scrollbar, .chat-list::-webkit-scrollbar,
 .content pre::-webkit-scrollbar, .modal::-webkit-scrollbar { width: 10px; height: 10px; }

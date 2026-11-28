@@ -3,14 +3,32 @@
 <head>
 <meta charset='utf-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1'>
-<title>photonnAI — ИИ-ассистент</title>
+<title>photonnAI — ИИ-ассистент на NVIDIA: умный, быстрый, честный</title>
+<meta name='description' content='photonnAI — персональный ИИ-ассистент на NVIDIA NIM: режимы Flash и Pro, веб-поиск, агент для файлов, MCP-инструменты, память чатов и проверка кода. Умный, быстрый и честный о свежих данных.'>
+<meta name='keywords' content='photonnAI, ИИ-ассистент, NVIDIA NIM, ChatGPT альтернатива, ИИ чат, Claude, Pro, Flash'>
+<meta name='robots' content='index, follow'>
+<meta property='og:type' content='website'>
+<meta property='og:title' content='photonnAI — ИИ-ассистент на NVIDIA'>
+<meta property='og:description' content='Умный ИИ-ассистент: Flash и Pro режимы, веб-поиск, агент, память и проверка кода.'>
+<meta property='og:image' content='/icon-512.png'>
+<meta name='twitter:card' content='summary'>
+<meta name='twitter:title' content='photonnAI — ИИ-ассистент на NVIDIA'>
+<meta name='twitter:description' content='Умный, быстрый и честный ИИ: Flash/Pro, поиск, агент, MCP и память чатов.'>
+<meta name='twitter:image' content='/icon-512.png'>
+<link id='canonicalLink' rel='canonical' href='/'>
+<link rel='alternate' hreflang='ru' href='/'>
+<link rel='alternate' hreflang='en' href='/?lang=en'>
+<script>
+  try { var c = document.getElementById('canonicalLink'); if (c && location.origin) c.href = location.origin + '/'; } catch (e) {}
+</script>
+<script type='application/ld+json'>{"@context":"https://schema.org","@type":"WebApplication","name":"photonnAI","alternateName":"photonn AI","url":"/","applicationCategory":"DeveloperApplication","operatingSystem":"Web","description":"Personal AI assistant on NVIDIA NIM: Flash and Pro modes, web search, file agent, MCP tools, chat memory and code verification.","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
 <meta name='theme-color' content='#0a0b0e'>
 <link rel='icon' href='/icon-192.png'>
 <link rel='manifest' href='/manifest.webmanifest'>
 <link rel='apple-touch-icon' href='/icon-192.png'>
 <meta name='apple-mobile-web-app-capable' content='yes'>
 <meta name='apple-mobile-web-app-title' content='photonnAI'>
-<link rel='stylesheet' href='/style.css?v=37'>
+<link rel='stylesheet' href='/style.css?v=38'>
 <script>
   // Тему ставим до первой отрисовки, иначе при светлой теме экран мигает чёрным.
   try {
@@ -325,6 +343,7 @@
 </div>
 
 <div class='toast hidden' id='toast'></div>
+<noscript><div class='seo-fallback'><h1>photonnAI — ИИ-ассистент на NVIDIA</h1><p>photonnAI — персональный ИИ-ассистент на NVIDIA NIM: режимы Flash и Pro, веб-поиск свежих данных, агент для файлов на компьютере, MCP-инструменты, память чатов и проверка кода. Включи JavaScript, чтобы пользоваться чатом.</p></div></noscript>
 
 <div class='ban-screen hidden' id='banScreen'>
   <div class='ban-card'>
@@ -344,7 +363,7 @@
 (function () {
   if ('caches' in window) {
     caches.keys().then(function (ks) {
-      ks.forEach(function (k) { if (k.indexOf('photonn-v37') !== 0) caches.delete(k); });
+      ks.forEach(function (k) { if (k.indexOf('photonn-v38') !== 0) caches.delete(k); });
     }).catch(function () {});
   }
   if ('serviceWorker' in navigator) {
@@ -354,6 +373,6 @@
   }
 })();
 </script>
-<script src='/app.js?v=37'></script>
+<script src='/app.js?v=38'></script>
 </body>
 </html>

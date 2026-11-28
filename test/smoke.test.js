@@ -17,8 +17,8 @@ test('server serves shell and search/export endpoints', async (t) => {
       const search = await (await fetch(`http://127.0.0.1:${port}/api/search?q=photonn`)).json();
       const exp = await (await fetch(`http://127.0.0.1:${port}/api/chats/export`)).json();
       assert.equal(home.ok, true);
-      assert.ok(ht.includes('style.css?v=38'));
-      assert.ok(ht.includes('app.js?v=38'));
+      assert.ok(ht.includes('style.css?v=39'));
+      assert.ok(ht.includes('app.js?v=39'));
       assert.ok(Array.isArray(search.results));
       assert.ok(Array.isArray(exp.chats));
       ok = true;

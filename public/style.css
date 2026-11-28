@@ -773,6 +773,9 @@ body.is-streaming .send { box-shadow: 0 3px 18px rgba(123, 162, 255, 0.44); }
 
 .seo-fallback { max-width: 640px; margin: 60px auto 20px; padding: 24px; text-align: center; color: var(--text-2); }
 
+.msg-img { display: block; width: min(100%, 480px); border-radius: var(--r-lg); margin: 0 0 8px; box-shadow: var(--shadow); }
+.msg-attach { font-size: 12px; color: var(--text-3); margin-bottom: 6px; }
+
 /* ---------- палитра Ctrl+K ---------- */
 .palette-back {
   position: fixed; inset: 0; z-index: 120; display: grid; place-items: start center;

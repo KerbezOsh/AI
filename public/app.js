@@ -813,7 +813,14 @@ function messageNode(msg, question) {
     bubble.appendChild(det);
   }
 
-  if (msg.image) bubble.appendChild(el('div', 'msg-attach', '📷 фото приложено'));
+  if (msg.image && typeof msg.image === 'string' && (msg.image.startsWith('data:image') || msg.image.startsWith('http'))) {
+    const img = document.createElement('img');
+    img.className = 'msg-img';
+    img.src = msg.image;
+    img.alt = 'Сгенерированная картинка';
+    img.loading = 'lazy';
+    bubble.appendChild(img);
+  } else if (msg.image) bubble.appendChild(el('div', 'msg-attach', '📷 фото приложено'));
   if (msg.file && msg.file.name) bubble.appendChild(el('div', 'msg-attach', '📄 ' + msg.file.name));
   if (msg.search) bubble.appendChild(el('div', 'msg-attach', '🌐 поиск: ' + msg.search));
 
@@ -2440,6 +2447,25 @@ function renderChatList() {
   }
 }
 
+async function generateImage() {
+  const input = $('input');
+  const prompt = String(input.value || '').trim();
+  if (!prompt) { input.focus(); toast(uiLang === 'en' ? 'Describe the picture first' : 'Сначала опиши картинку'); return; }
+  input.value = '';
+  resizeInput();
+  toast(uiLang === 'en' ? 'Generating…' : 'Генерирую картинку…');
+  try {
+    const r = await fetch('/api/image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) });
+    const j = await r.json();
+    if (!r.ok || !j.url) throw new Error(j.error || 'failed');
+    state.messages.push({ role: 'user', content: '🎨 ' + prompt, image: j.url });
+    renderMessages();
+    toast(uiLang === 'en' ? 'Done' : 'Готово');
+  } catch (e) {
+    toast('Не получилось: ' + e.message);
+  }
+}
+
 async function exportChats() {
   try {
     const r = await fetch('/api/chats/export');
@@ -2793,6 +2819,7 @@ on('mNew', () => newChat(false));
   on('btnSettings', openSettings);
   on('sideSettings', openSettings);
   on('exportChats', exportChats);
+  on('btnImage', generateImage);
   on('langBtn', async () => {
     uiLang = uiLang === 'ru' ? 'en' : 'ru';
     try { localStorage.setItem('photonn.lang', uiLang); } catch (e) {}
@@ -2907,8 +2934,8 @@ init();
 
 // ── Язык интерфейса ───────────────────────────────────────────────
 const I18N = {
-  ru: { newChat: 'Новый чат', history: 'История', settings: 'Настройки', export: 'Экспорт чатов', ask: 'Спросить photonnAI', settingsTitle: 'Настройки', settingsSub: 'Сохраняются на этом устройстве', theme: 'Тема', dark: 'Тёмная', light: 'Светлая', system: 'Как в системе', fontSize: 'Размер текста', sm: 'Мелкий', md: 'Обычный', lg: 'Крупный', ansStyle: 'Стиль ответа', normal: 'Обычный', brief: 'Коротко', detailed: 'Подробно', beginner: 'Для новичка', expert: 'Как эксперт', behavior: 'Поведение', reset: 'Сбросить', done: 'Готово', q1: 'Объясни проще', q2: 'Дай пример', q3: 'По шагам', q4: 'Итог', q5: 'Ошибки', camera: 'Камера', web: 'Веб-поиск', deep: 'Размышления', agent: 'Агент', welcome: 'С чего начнём?', w1: 'Написать текст', w2: 'Разобрать задачу', w3: 'Объяснить код', w4: 'Сравнить и решить' },
-  en: { newChat: 'New chat', history: 'History', settings: 'Settings', export: 'Export chats', ask: 'Ask photonnAI', settingsTitle: 'Settings', settingsSub: 'Stored on this device', theme: 'Theme', dark: 'Dark', light: 'Light', system: 'As system', fontSize: 'Text size', sm: 'Small', md: 'Normal', lg: 'Large', ansStyle: 'Answer style', normal: 'Normal', brief: 'Brief', detailed: 'Detailed', beginner: 'Beginner', expert: 'Expert', behavior: 'Behavior', reset: 'Reset', done: 'Done', q1: 'Simplify', q2: 'Give example', q3: 'Step by step', q4: 'Summary', q5: 'Pitfalls', camera: 'Camera', web: 'Web search', deep: 'Thinking', agent: 'Agent', welcome: 'What shall we start with?', w1: 'Write text', w2: 'Break down task', w3: 'Explain code', w4: 'Compare & decide' }
+  ru: { newChat: 'Новый чат', history: 'История', settings: 'Настройки', export: 'Экспорт чатов', ask: 'Спросить photonnAI', settingsTitle: 'Настройки', settingsSub: 'Сохраняются на этом устройстве', theme: 'Тема', dark: 'Тёмная', light: 'Светлая', system: 'Как в системе', fontSize: 'Размер текста', sm: 'Мелкий', md: 'Обычный', lg: 'Крупный', ansStyle: 'Стиль ответа', normal: 'Обычный', brief: 'Коротко', detailed: 'Подробно', beginner: 'Для новичка', expert: 'Как эксперт', behavior: 'Поведение', reset: 'Сбросить', done: 'Готово', q1: 'Объясни проще', q2: 'Дай пример', q3: 'По шагам', q4: 'Итог', q5: 'Ошибки', camera: 'Камера', web: 'Веб-поиск', deep: 'Размышления', agent: 'Агент', image: 'Картинка', welcome: 'С чего начнём?', w1: 'Написать текст', w2: 'Разобрать задачу', w3: 'Объяснить код', w4: 'Сравнить и решить' },
+  en: { newChat: 'New chat', history: 'History', settings: 'Settings', export: 'Export chats', ask: 'Ask photonnAI', settingsTitle: 'Settings', settingsSub: 'Stored on this device', theme: 'Theme', dark: 'Dark', light: 'Light', system: 'As system', fontSize: 'Text size', sm: 'Small', md: 'Normal', lg: 'Large', ansStyle: 'Answer style', normal: 'Normal', brief: 'Brief', detailed: 'Detailed', beginner: 'Beginner', expert: 'Expert', behavior: 'Behavior', reset: 'Reset', done: 'Done', q1: 'Simplify', q2: 'Give example', q3: 'Step by step', q4: 'Summary', q5: 'Pitfalls', camera: 'Camera', web: 'Web search', deep: 'Thinking', agent: 'Agent', image: 'Picture', welcome: 'What shall we start with?', w1: 'Write text', w2: 'Break down task', w3: 'Explain code', w4: 'Compare & decide' }
 };
 let uiLang = 'ru';
 function applyLang() {

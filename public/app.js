@@ -1013,6 +1013,7 @@ function appendStreamingMessage(msg) {
 
 function setStreamingUI(on) {
   state.streaming = on;
+  document.body.classList.toggle('is-streaming', on);
   $('send').hidden = on;
   $('stop').hidden = !on;
 }

@@ -10,7 +10,7 @@ const TIERS = String(process.env.PHOTONN_TIERS || 'easy,pro').split(',').map((s)
 
 const TASKS = [
   { id: 'code-sort', tier: 'easy', text: 'Напиши функцию на Python для сортировки списка словарей по полю age и возвращай новый список.', must: [/python/i, /sorted|sort/i, /age/i] },
-  { id: 'math-percent', tier: 'easy', text: 'Посчитай 17% от 43890 и покажи шаги расчёта.', must: [/745/i, /%|процент/i] },
+  { id: 'math-percent', tier: 'easy', text: 'Посчитай 17% от 43890 и покажи шаги расчёта.', must: [/746/i, /%|процент/i] },
   { id: 'logic', tier: 'pro', text: 'Объясни разницу между процессом и потоком и приведи пример на C++ без лишней воды.', must: [/процесс/i, /поток/i] },
   { id: 'factual', tier: 'pro', text: 'Какие модели используются в photonnAI? Ответь списком.', must: [/minimax/i, /nemotron/i] },
   { id: 'creative', tier: 'easy', text: 'Напиши короткий стих про осень из четырёх строк.', must: [/осен/i] },

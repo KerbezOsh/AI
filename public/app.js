@@ -819,6 +819,7 @@ function messageNode(msg, question) {
     img.src = msg.image;
     img.alt = 'Сгенерированная картинка';
     img.loading = 'lazy';
+    img.onerror = () => { if (msg.imageFallback && img.src !== msg.imageFallback) img.src = msg.imageFallback; };
     bubble.appendChild(img);
   } else if (msg.image) bubble.appendChild(el('div', 'msg-attach', '📷 фото приложено'));
   if (msg.file && msg.file.name) bubble.appendChild(el('div', 'msg-attach', '📄 ' + msg.file.name));
@@ -2458,7 +2459,7 @@ async function generateImage() {
     const r = await fetch('/api/image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) });
     const j = await r.json();
     if (!r.ok || !j.url) throw new Error(j.error || 'failed');
-    state.messages.push({ role: 'user', content: '🎨 ' + prompt, image: j.url });
+    state.messages.push({ role: 'user', content: '🎨 ' + prompt, image: j.url, imageFallback: j.fallbackUrl || '' });
     renderMessages();
     toast(uiLang === 'en' ? 'Done' : 'Готово');
   } catch (e) {

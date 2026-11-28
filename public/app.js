@@ -2459,6 +2459,19 @@ async function generateImage() {
   input.value = '';
   resizeInput();
   toast(uiLang === 'en' ? 'Generating…' : 'Генерирую картинку…');
+  // Сначала Puter.js (без ключа, платит пользователь), затем резервная цепочка.
+  if (window.puter && window.puter.ai && window.puter.ai.txt2img) {
+    try {
+      const imgEl = await window.puter.ai.txt2img(prompt, { model: 'openai/gpt-image-2.6-flare', quality: 'low' });
+      const src = imgEl && (imgEl.src || imgEl.getAttribute && imgEl.getAttribute('src'));
+      if (src) {
+        state.messages.push({ role: 'user', content: '🎨 ' + prompt, image: src });
+        renderMessages();
+        toast(uiLang === 'en' ? 'Done' : 'Готово');
+        return;
+      }
+    } catch (e) {}
+  }
   try {
     const r = await fetch('/api/image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) });
     const j = await r.json();
